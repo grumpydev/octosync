@@ -770,9 +770,9 @@ export class SyncManager {
   private async writeBlob(path: string, bytes: ArrayBuffer): Promise<void> {
     const existing = this.vault.getAbstractFileByPath(path);
 
-    if (existing instanceof TFile) {
-      await this.vault.modifyBinary(existing, bytes);
-      return;
+    // Delete existing file/folder to avoid "File already exists" error
+    if (existing) {
+      await this.vault.delete(existing);
     }
 
     await this.ensureParentFolder(path);
@@ -833,7 +833,9 @@ export class SyncManager {
       }
 
       if (existing) {
-        throw new Error(`Cannot create folder ${current}; a file already exists there.`);
+        // Skip folder creation if a file already exists at this path
+        // This can happen when GitHub has a folder where local has a file
+        continue;
       }
 
       await this.vault.createFolder(current);
@@ -874,7 +876,9 @@ export class SyncManager {
       }
 
       if (existing) {
-        throw new Error(`Cannot create folder ${current}; a file already exists there.`);
+        // Skip folder creation if a file already exists at this path
+        // This can happen when GitHub has a folder where local has a file
+        continue;
       }
 
       await this.vault.createFolder(current);
