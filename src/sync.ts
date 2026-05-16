@@ -91,7 +91,7 @@ export class SyncManager {
       throw new SyncConflictError(plan.summary.conflicts);
     }
 
-    if (!(await confirmPlan(plan.summary))) {
+    if (hasUserVisibleSyncChanges(plan.summary) && !(await confirmPlan(plan.summary))) {
       return null;
     }
 
@@ -1112,6 +1112,10 @@ function parentFolderPath(path: string): string {
 }
 
 export function formatSummary(summary: SyncSummary): string {
+  if (!hasUserVisibleSyncChanges(summary)) {
+    return "No sync required. Everything is up to date.";
+  }
+
   const parts = [
     `${summary.uploaded} uploaded`,
     `${summary.downloaded} downloaded`,
@@ -1132,6 +1136,20 @@ export function formatSummary(summary: SyncSummary): string {
 
 export function notifySummary(summary: SyncSummary): void {
   new Notice(`Octosync complete: ${formatSummary(summary)}`);
+}
+
+export function hasUserVisibleSyncChanges(summary: SyncSummary): boolean {
+  return (
+    summary.uploaded > 0 ||
+    summary.downloaded > 0 ||
+    summary.deletedLocal > 0 ||
+    summary.deletedRemote > 0 ||
+    summary.foldersUploaded > 0 ||
+    summary.foldersDownloaded > 0 ||
+    summary.foldersDeletedLocal > 0 ||
+    summary.foldersDeletedRemote > 0 ||
+    summary.conflicts.length > 0
+  );
 }
 
 export type ConflictResolution = "local" | "remote" | "both";

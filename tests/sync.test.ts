@@ -1,9 +1,15 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TFile, TFolder } from "obsidian";
 import { GitHubRequestError, type GitHubClient } from "../src/github";
 import { base64ToBytes, bytesToBase64, gitBlobSha } from "../src/hash";
 import { MetadataStore } from "../src/metadata";
-import { SyncConflictError, SyncManager, formatSummary, shouldIgnorePath } from "../src/sync";
+import {
+  SyncConflictError,
+  SyncManager,
+  formatSummary,
+  hasUserVisibleSyncChanges,
+  shouldIgnorePath,
+} from "../src/sync";
 import { DEFAULT_SETTINGS, type OctosyncSettings, type RemoteFile } from "../src/types";
 
 const settings: OctosyncSettings = {
@@ -15,6 +21,23 @@ const settings: OctosyncSettings = {
 };
 
 describe("sync helpers", () => {
+  it("formats zero-change summaries as up to date", () => {
+    const summary = {
+      uploaded: 0,
+      downloaded: 0,
+      deletedLocal: 0,
+      deletedRemote: 0,
+      foldersUploaded: 0,
+      foldersDownloaded: 0,
+      foldersDeletedLocal: 0,
+      foldersDeletedRemote: 0,
+      conflicts: [],
+    };
+
+    expect(hasUserVisibleSyncChanges(summary)).toBe(false);
+    expect(formatSummary(summary)).toBe("No sync required. Everything is up to date.");
+  });
+
   it("formats summaries with conflict counts", () => {
     expect(
       formatSummary({
@@ -124,6 +147,38 @@ describe("SyncManager", () => {
 
     expect(summary.uploaded).toBe(0);
     expect(summary.downloaded).toBe(0);
+    expect(github.commits).toBe(0);
+  });
+
+  it("skips confirmation when a plan has no user-visible changes", async () => {
+    const vault = new MemoryVault();
+    const github = new MockGitHubClient();
+    const metadata = await createMetadata();
+    const sha = await github.addRemoteFile("note.md", "same");
+    vault.addFile("note.md", "same");
+    const confirmPlan = vi.fn(async () => true);
+
+    const summary = await createManager(vault, github, metadata).syncWithConfirmation(confirmPlan);
+
+    expect(confirmPlan).not.toHaveBeenCalled();
+    expect(summary).not.toBeNull();
+    expect(formatSummary(summary!)).toBe("No sync required. Everything is up to date.");
+    expect(metadata.get("note.md")?.sha).toBe(sha);
+    expect(github.commits).toBe(0);
+  });
+
+  it("asks for confirmation when a plan has user-visible changes", async () => {
+    const vault = new MemoryVault();
+    const github = new MockGitHubClient();
+    const metadata = await createMetadata();
+    vault.addFile("note.md", "local");
+    const confirmPlan = vi.fn(async () => false);
+
+    const summary = await createManager(vault, github, metadata).syncWithConfirmation(confirmPlan);
+
+    expect(summary).toBeNull();
+    expect(confirmPlan).toHaveBeenCalledWith(expect.objectContaining({ uploaded: 1 }));
+    expect(github.remote.has("note.md")).toBe(false);
     expect(github.commits).toBe(0);
   });
 
