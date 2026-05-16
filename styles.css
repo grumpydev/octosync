@@ -10,9 +10,18 @@
 }
 
 .octosync-settings-logo {
+  align-items: center;
   border-radius: 8px;
+  color: var(--interactive-accent);
+  display: flex;
   height: 64px;
-  object-fit: cover;
+  justify-content: center;
+  flex: 0 0 64px;
+  width: 64px;
+}
+
+.octosync-settings-logo svg {
+  height: 64px;
   width: 64px;
 }
 

@@ -2,6 +2,7 @@ import { App, ButtonComponent, DropdownComponent, Notice, PluginSettingTab, Sett
 import type OctosyncPlugin from "./main";
 import { createAuthProvider } from "./auth";
 import { GitHubClient } from "./github";
+import { OCTOSYNC_ICON } from "./icons";
 import type { GitHubBranch, GitHubRepository } from "./types";
 
 const SUPPORT_LINKS = {
@@ -57,17 +58,9 @@ export class OctosyncSettingTab extends PluginSettingTab {
 
   private addHeader(containerEl: HTMLElement): void {
     const header = containerEl.createDiv({ cls: "octosync-settings-header" });
-    const logoSrc = this.getLogoSrc();
-
-    if (logoSrc) {
-      header.createEl("img", {
-        attr: {
-          alt: "",
-          src: logoSrc,
-        },
-        cls: "octosync-settings-logo",
-      });
-    }
+    const logo = header.createDiv({ cls: "octosync-settings-logo" });
+    logo.setAttr("aria-hidden", "true");
+    logo.innerHTML = OCTOSYNC_ICON;
 
     const text = header.createDiv();
     text.createEl("h2", { text: "Octosync" });
@@ -555,13 +548,6 @@ export class OctosyncSettingTab extends PluginSettingTab {
     return "Connect a fine-grained GitHub token, then load repositories.";
   }
 
-  private getLogoSrc(): string | null {
-    if (!this.plugin.manifest.dir) {
-      return null;
-    }
-
-    return this.app.vault.adapter.getResourcePath(`${this.plugin.manifest.dir}/logo.png`);
-  }
 }
 
 function hydrateDropdown(

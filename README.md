@@ -77,7 +77,6 @@ The folder should contain:
 main.js
 manifest.json
 styles.css
-logo.png
 ```
 
 Restart Obsidian or reload plugins, then enable Octosync from Community plugins.
