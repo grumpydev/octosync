@@ -40,6 +40,25 @@ interface SyncPlan {
   folderActions: FolderPlanAction[];
 }
 
+export interface SyncProgress {
+  completed: number;
+  total: number;
+  operation:
+    | "upload"
+    | "download"
+    | "deleteRemote"
+    | "deleteLocal"
+    | "uploadFolder"
+    | "downloadFolder"
+    | "deleteRemoteFolder"
+    | "deleteLocalFolder";
+  path: string;
+}
+
+export interface SyncExecutionOptions {
+  onProgress?: (progress: SyncProgress) => void;
+}
+
 type FilePlanAction =
   | { type: "upload"; path: string; file: LocalFileSnapshot; blobSha?: string }
   | { type: "download"; path: string; sha: string }
@@ -64,7 +83,7 @@ export class SyncManager {
     private readonly debugLog?: DebugLogSink,
   ) {}
 
-  async sync(): Promise<SyncSummary> {
+  async sync(options: SyncExecutionOptions = {}): Promise<SyncSummary> {
     const plan = await this.createSyncPlan();
 
     if (plan.summary.conflicts.length > 0) {
@@ -75,11 +94,12 @@ export class SyncManager {
       throw new SyncConflictError(plan.summary.conflicts);
     }
 
-    return this.executeSyncPlan(plan);
+    return this.executeSyncPlan(plan, options);
   }
 
   async syncWithConfirmation(
     confirmPlan: (summary: SyncSummary) => Promise<boolean>,
+    options: SyncExecutionOptions = {},
   ): Promise<SyncSummary | null> {
     const plan = await this.createSyncPlan();
 
@@ -95,7 +115,7 @@ export class SyncManager {
       return null;
     }
 
-    return this.executeSyncPlan(plan);
+    return this.executeSyncPlan(plan, options);
   }
 
   async planSync(): Promise<SyncSummary> {
@@ -359,19 +379,20 @@ export class SyncManager {
     };
   }
 
-  private async executeSyncPlan(plan: SyncPlan): Promise<SyncSummary> {
+  private async executeSyncPlan(plan: SyncPlan, options: SyncExecutionOptions): Promise<SyncSummary> {
     const metadataSnapshot = cloneMetadata(this.metadata.data);
     const now = Date.now();
+    const progress = createProgressReporter(plan.summary, options.onProgress);
     try {
       const preparedDownloads = await this.prepareDownloads(plan.fileActions);
-      const treeUpdates = await this.prepareRemoteUpdates(plan.fileActions, plan.folderActions);
+      const treeUpdates = await this.prepareRemoteUpdates(plan.fileActions, plan.folderActions, progress);
 
       if (treeUpdates.size > 0) {
         await this.commitTreeUpdates(plan.remote, treeUpdates);
       }
 
-      await this.applyFileActions(plan.fileActions, preparedDownloads, now);
-      await this.applyFolderActions(plan.folderActions, now);
+      await this.applyFileActions(plan.fileActions, preparedDownloads, now, progress);
+      await this.applyFolderActions(plan.folderActions, now, progress);
       await this.metadata.save();
       return plan.summary;
     } catch (error) {
@@ -398,6 +419,7 @@ export class SyncManager {
   private async prepareRemoteUpdates(
     fileActions: FilePlanAction[],
     folderActions: FolderPlanAction[],
+    progress: ProgressReporter,
   ): Promise<Map<string, string | null>> {
     const treeUpdates = new Map<string, string | null>();
     let markerSha: string | null = null;
@@ -406,10 +428,12 @@ export class SyncManager {
       if (action.type === "upload") {
         action.blobSha = await this.uploadBlob(action.file);
         treeUpdates.set(action.path, action.blobSha);
+        progress("upload", action.path);
       }
 
       if (action.type === "deleteRemote") {
         treeUpdates.set(action.path, null);
+        progress("deleteRemote", action.path);
       }
     }
 
@@ -418,10 +442,12 @@ export class SyncManager {
         markerSha ??= await this.uploadEmptyFolderMarker();
         action.markerSha = markerSha;
         treeUpdates.set(action.markerPath, markerSha);
+        progress("uploadFolder", action.folderPath);
       }
 
       if (action.type === "deleteRemoteMarker") {
         treeUpdates.set(action.markerPath, null);
+        progress("deleteRemoteFolder", action.folderPath);
       }
     }
 
@@ -432,6 +458,7 @@ export class SyncManager {
     actions: FilePlanAction[],
     preparedDownloads: Map<string, ArrayBuffer>,
     now: number,
+    progress: ProgressReporter,
   ): Promise<void> {
     for (const action of actions) {
       switch (action.type) {
@@ -452,6 +479,7 @@ export class SyncManager {
           }
           await this.writeBlob(action.path, bytes);
           this.metadata.update(action.path, { sha: action.sha, deleted: false, dirty: false }, now);
+          progress("download", action.path);
           break;
         }
         case "deleteRemote":
@@ -460,6 +488,7 @@ export class SyncManager {
         case "deleteLocal":
           await this.deleteLocalFile(action.file);
           this.metadata.update(action.path, { sha: null, deleted: true, dirty: false }, now);
+          progress("deleteLocal", action.path);
           break;
         case "metadata":
           this.metadata.update(
@@ -472,7 +501,7 @@ export class SyncManager {
     }
   }
 
-  private async applyFolderActions(actions: FolderPlanAction[], now: number): Promise<void> {
+  private async applyFolderActions(actions: FolderPlanAction[], now: number, progress: ProgressReporter): Promise<void> {
     for (const action of actions) {
       switch (action.type) {
         case "uploadMarker":
@@ -492,6 +521,7 @@ export class SyncManager {
             { markerSha: action.markerSha, deleted: false },
             now,
           );
+          progress("downloadFolder", action.folderPath);
           break;
         case "deleteRemoteMarker":
           this.metadata.updateFolder(
@@ -507,6 +537,7 @@ export class SyncManager {
             { markerSha: null, deleted: true },
             now,
           );
+          progress("deleteLocalFolder", action.folderPath);
           break;
         case "updateFolder":
           this.metadata.updateFolder(
@@ -964,6 +995,31 @@ function createEmptySummary(): SyncSummary {
     foldersDeletedLocal: 0,
     foldersDeletedRemote: 0,
     conflicts: [],
+  };
+}
+
+type ProgressReporter = (operation: SyncProgress["operation"], path: string) => void;
+
+function createProgressReporter(summary: SyncSummary, onProgress?: (progress: SyncProgress) => void): ProgressReporter {
+  const total =
+    summary.uploaded +
+    summary.downloaded +
+    summary.deletedRemote +
+    summary.deletedLocal +
+    summary.foldersUploaded +
+    summary.foldersDownloaded +
+    summary.foldersDeletedRemote +
+    summary.foldersDeletedLocal;
+  let completed = 0;
+
+  return (operation, path) => {
+    completed += 1;
+    onProgress?.({
+      completed,
+      total,
+      operation,
+      path,
+    });
   };
 }
 

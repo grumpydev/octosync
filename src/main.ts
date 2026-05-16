@@ -12,6 +12,7 @@ import {
   notifySummary,
   SyncConflictError,
   SyncManager,
+  type SyncProgress,
 } from "./sync";
 import { DEFAULT_SETTINGS, type OctosyncSettings, type SyncSummary } from "./types";
 
@@ -361,6 +362,8 @@ export default class OctosyncPlugin extends Plugin {
   }
 
   private async runSync(options: { confirm: boolean }): Promise<void> {
+    let progressNotice: Notice | null = null;
+
     try {
       this.debugLog.write("sync.start", {
         owner: this.settings.owner,
@@ -370,14 +373,30 @@ export default class OctosyncPlugin extends Plugin {
       });
 
       const manager = this.createSyncManager();
+      progressNotice = new Notice("Octosync: preparing sync plan...", 0);
       const summary = options.confirm
-        ? await manager.syncWithConfirmation((plannedSummary) =>
-            new SyncConfirmationModal(this, plannedSummary).confirm(),
+        ? await manager.syncWithConfirmation(
+            async (plannedSummary) => {
+              progressNotice?.hide();
+              progressNotice = null;
+              return new SyncConfirmationModal(this, plannedSummary).confirm();
+            },
+            {
+              onProgress: (progress) => {
+                progressNotice ??= new Notice(formatSyncProgress(progress), 0);
+                progressNotice.setMessage(formatSyncProgress(progress));
+              },
+            },
           )
-        : await manager.sync();
+        : await manager.sync({
+            onProgress: (progress) => {
+              progressNotice?.setMessage(formatSyncProgress(progress));
+            },
+          });
 
       if (!summary) {
         this.debugLog.write("sync.cancelled");
+        progressNotice?.hide();
         new Notice("Octosync sync cancelled.");
         return;
       }
@@ -387,6 +406,7 @@ export default class OctosyncPlugin extends Plugin {
       this.settings.lastSyncSummary = formatSummary(summary);
       await this.saveSettings();
       this.debugLog.write("sync.complete", summary);
+      progressNotice?.hide();
       notifySummary(summary);
       this.dirtyLocalPaths.clear();
       await this.refreshPostOperationIndicators();
@@ -398,6 +418,7 @@ export default class OctosyncPlugin extends Plugin {
           count: error.conflicts.length,
           conflicts: error.conflicts,
         });
+        progressNotice?.hide();
         new ConflictResolutionModal(this, error.conflicts).open();
         await this.refreshPostOperationIndicators();
         return;
@@ -407,6 +428,7 @@ export default class OctosyncPlugin extends Plugin {
       this.settings.lastSyncSummary = `Failed: ${message}`;
       await this.saveSettings();
       this.debugLog.write("sync.failed", { message });
+      progressNotice?.hide();
       new Notice(`Octosync failed: ${message}`, 8000);
       console.error("Octosync failed", error);
       await this.refreshPostOperationIndicators();
@@ -602,4 +624,41 @@ function getRibbonLabel(syncing: boolean, hasLocalChanges: boolean, hasRemoteCha
   }
 
   return "Sync with Octosync";
+}
+
+function formatSyncProgress(progress: SyncProgress): string {
+  return [
+    "Octosync is syncing...",
+    `${formatOperationLabel(progress.operation)} ${truncatePath(progress.path)}`,
+  ].join("\n");
+}
+
+function formatOperationLabel(operation: SyncProgress["operation"]): string {
+  switch (operation) {
+    case "upload":
+      return "Uploading";
+    case "download":
+      return "Downloading";
+    case "deleteRemote":
+      return "Deleting from GitHub";
+    case "deleteLocal":
+      return "Deleting locally";
+    case "uploadFolder":
+      return "Uploading folder";
+    case "downloadFolder":
+      return "Creating folder";
+    case "deleteRemoteFolder":
+      return "Deleting folder from GitHub";
+    case "deleteLocalFolder":
+      return "Deleting local folder";
+  }
+}
+
+function truncatePath(path: string): string {
+  const maxLength = 72;
+  if (path.length <= maxLength) {
+    return path;
+  }
+
+  return `...${path.slice(path.length - maxLength + 3)}`;
 }

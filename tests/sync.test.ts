@@ -302,6 +302,26 @@ describe("SyncManager", () => {
     expect(await github.readRemoteText("note.md")).toBe("new");
   });
 
+  it("reports progress while applying sync changes", async () => {
+    const vault = new MemoryVault();
+    const github = new MockGitHubClient();
+    const metadata = await createMetadata();
+    vault.addFile("local.md", "local");
+    await github.addRemoteFile("remote.md", "remote");
+    const progress: Array<{ completed: number; total: number; operation: string; path: string }> = [];
+
+    const summary = await createManager(vault, github, metadata).sync({
+      onProgress: (event) => progress.push(event),
+    });
+
+    expect(summary.uploaded).toBe(1);
+    expect(summary.downloaded).toBe(1);
+    expect(progress).toEqual([
+      expect.objectContaining({ completed: 1, total: 2, operation: "upload", path: "local.md" }),
+      expect.objectContaining({ completed: 2, total: 2, operation: "download", path: "remote.md" }),
+    ]);
+  });
+
   it("downloads remote edits when local still matches metadata", async () => {
     const vault = new MemoryVault();
     const github = new MockGitHubClient();
