@@ -1,6 +1,6 @@
 {
   "name": "octosync",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "An Obsidian plugin for syncing a vault directly with GitHub APIs.",
   "main": "main.js",
   "scripts": {
@@ -17,7 +17,7 @@
     "github",
     "sync"
   ],
-  "author": "",
+  "author": "grumpydev",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.11.30",
