@@ -43,6 +43,12 @@ The automated tests cover settings UI behavior, simulation, local and remote cha
 
 That testing does not remove the need for backups, especially while the plugin is young, but it gives the sync logic a real safety net rather than relying only on happy-path manual testing.
 
+## Privacy And Access
+
+Octosync enumerates vault files so it can compare local paths with the configured GitHub branch and decide what needs to sync. It deliberately excludes `.obsidian/**` so plugin settings, tokens, and device-specific Obsidian state are not uploaded as notes.
+
+Octosync does not read from or write to the system clipboard.
+
 ## Support
 
 Octosync is free to use. If it saves you time and you want to support ongoing development, you can sponsor the project on [GitHub Sponsors](https://github.com/sponsors/grumpydev) or send a one-off tip on [Ko-fi](https://ko-fi.com/grumpydev).

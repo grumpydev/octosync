@@ -339,16 +339,7 @@ export class OctosyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Debug log")
-      .setDesc(`${this.plugin.getDebugLogCount()} entries`)
-      .addButton((button) => {
-        button
-          .setButtonText("Copy")
-          .onClick(async () => {
-            const text = this.plugin.getDebugLogText();
-            await navigator.clipboard.writeText(text || "Octosync debug log is empty.");
-            new Notice("Octosync debug log copied.");
-          });
-      })
+      .setDesc(`${this.plugin.getDebugLogCount()} entries. The log is shown below and can be selected manually.`)
       .addButton((button) => {
         button
           .setButtonText("Clear")

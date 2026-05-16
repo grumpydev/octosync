@@ -21,7 +21,6 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.11.30",
-    "builtin-modules": "^3.3.0",
     "esbuild": "^0.28.0",
     "obsidian": "^1.5.12",
     "playwright-core": "^1.60.0",
