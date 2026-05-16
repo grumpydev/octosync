@@ -833,9 +833,7 @@ export class SyncManager {
       }
 
       if (existing) {
-        // Skip folder creation if a file already exists at this path
-        // This can happen when GitHub has a folder where local has a file
-        continue;
+        throw new Error(`Cannot create folder ${current}; a file already exists there.`);
       }
 
       await this.vault.createFolder(current);
@@ -876,9 +874,7 @@ export class SyncManager {
       }
 
       if (existing) {
-        // Skip folder creation if a file already exists at this path
-        // This can happen when GitHub has a folder where local has a file
-        continue;
+        throw new Error(`Cannot create folder ${current}; a file already exists there.`);
       }
 
       await this.vault.createFolder(current);
