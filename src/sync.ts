@@ -828,7 +828,7 @@ export class SyncManager {
       current = current ? `${current}/${part}` : part;
       const existing = this.vault.getAbstractFileByPath(current);
 
-      if (existing instanceof TFolder) {
+      if (existing instanceof TFolder || existing instanceof TFile) {
         continue;
       }
 
@@ -871,7 +871,7 @@ export class SyncManager {
       current = current ? `${current}/${part}` : part;
       const existing = this.vault.getAbstractFileByPath(current);
 
-      if (existing instanceof TFolder) {
+      if (existing instanceof TFolder || existing instanceof TFile) {
         continue;
       }
 
