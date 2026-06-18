@@ -6,6 +6,7 @@ export class ConflictResolutionModal extends Modal {
   constructor(
     private readonly plugin: OctosyncPlugin,
     private readonly conflicts: string[],
+    private readonly onClosed?: () => void,
   ) {
     super(plugin.app);
   }
@@ -73,6 +74,7 @@ export class ConflictResolutionModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+    this.onClosed?.();
   }
 
   private async resolve(resolution: ConflictResolution): Promise<void> {

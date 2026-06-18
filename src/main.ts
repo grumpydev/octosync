@@ -39,6 +39,8 @@ export default class OctosyncPlugin extends Plugin {
   private hasRemoteChangesToSync = false;
   private ribbonIconEl: HTMLElement | null = null;
   private debugLog!: DebugLog;
+  private pendingConflictPaths: string[] | null = null;
+  private conflictModal: ConflictResolutionModal | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -78,7 +80,7 @@ export default class OctosyncPlugin extends Plugin {
 
     if (this.settings.syncMode === "automatic" && this.settings.syncOnStartup) {
       this.app.workspace.onLayoutReady(() => {
-        void this.runWithSyncLock(() => this.runSync({ confirm: false }));
+        void this.requestSync({ source: "automatic" });
       });
     }
   }
@@ -133,7 +135,7 @@ export default class OctosyncPlugin extends Plugin {
     }
 
     this.intervalId = window.setInterval(() => {
-      void this.runWithSyncLock(() => this.runSync({ confirm: false }));
+      void this.requestSync({ source: "automatic" });
     }, this.settings.syncIntervalMinutes * 60 * 1000);
 
     this.registerInterval(this.intervalId);
@@ -171,19 +173,18 @@ export default class OctosyncPlugin extends Plugin {
   }
 
   async syncNow(): Promise<void> {
-    return this.runWithSyncLock(() =>
-      this.runSync({
-        confirm: this.settings.syncMode === "manual" && this.settings.confirmBeforeManualSync,
-      }),
-    );
+    return this.requestSync({ source: "manual" });
   }
 
   async simulateSync(): Promise<void> {
-    return this.runWithSyncLock(() => this.runSimulation());
+    return this.runWithSyncLock(() => this.runSimulation(), { source: "manual" });
   }
 
   async resolveConflicts(paths: string[], resolution: ConflictResolution): Promise<void> {
-    return this.runWithSyncLock(() => this.runConflictResolution(paths, resolution));
+    return this.runWithSyncLock(() => this.runConflictResolution(paths, resolution), {
+      allowWhileConflictsPending: true,
+      source: "manual",
+    });
   }
 
   isSyncing(): boolean {
@@ -320,9 +321,57 @@ export default class OctosyncPlugin extends Plugin {
     }
   }
 
-  private async runWithSyncLock(operation: () => Promise<void>): Promise<void> {
+  private async requestSync(options: { source: "manual" | "automatic" }): Promise<void> {
+    if (this.pendingConflictPaths) {
+      this.debugLog.write("sync.skipped.pending-conflicts", {
+        source: options.source,
+        count: this.pendingConflictPaths.length,
+        conflicts: this.pendingConflictPaths,
+      });
+
+      if (options.source === "manual") {
+        new Notice("Octosync has unresolved conflicts.");
+        this.openConflictModal(this.pendingConflictPaths);
+      }
+
+      return;
+    }
+
+    return this.runWithSyncLock(
+      () =>
+        this.runSync({
+          confirm: this.settings.syncMode === "manual" && this.settings.confirmBeforeManualSync,
+        }),
+      options,
+    );
+  }
+
+  private async runWithSyncLock(
+    operation: () => Promise<void>,
+    options: {
+      allowWhileConflictsPending?: boolean;
+      source: "manual" | "automatic";
+    },
+  ): Promise<void> {
+    if (this.pendingConflictPaths && !options.allowWhileConflictsPending) {
+      this.debugLog.write("sync.lock.skipped.pending-conflicts", {
+        source: options.source,
+        count: this.pendingConflictPaths.length,
+        conflicts: this.pendingConflictPaths,
+      });
+
+      if (options.source === "manual") {
+        new Notice("Octosync has unresolved conflicts.");
+        this.openConflictModal(this.pendingConflictPaths);
+      }
+
+      return;
+    }
+
     if (this.syncInFlight) {
-      new Notice("Octosync is already syncing.");
+      if (options.source === "manual") {
+        new Notice("Octosync is already syncing.");
+      }
       return this.syncInFlight;
     }
 
@@ -419,7 +468,8 @@ export default class OctosyncPlugin extends Plugin {
           conflicts: error.conflicts,
         });
         progressNotice?.hide();
-        new ConflictResolutionModal(this, error.conflicts).open();
+        this.setPendingConflicts(error.conflicts);
+        this.openConflictModal(error.conflicts);
         await this.refreshPostOperationIndicators();
         return;
       }
@@ -472,6 +522,7 @@ export default class OctosyncPlugin extends Plugin {
         paths,
       });
       const summary = await this.createSyncManager().resolveConflicts(paths, resolution);
+      this.clearPendingConflicts();
       this.settings.lastSyncCompletedAt = Date.now();
       this.settings.lastSyncSummary = formatSummary(summary);
       await this.saveSettings();
@@ -501,6 +552,29 @@ export default class OctosyncPlugin extends Plugin {
       this.hasRemoteChangesToSync = false;
       this.updateSyncUiState();
     }
+  }
+
+  private setPendingConflicts(conflicts: string[]): void {
+    this.pendingConflictPaths = [...conflicts].sort();
+    this.updateSyncUiState();
+  }
+
+  private clearPendingConflicts(): void {
+    this.pendingConflictPaths = null;
+    this.conflictModal = null;
+    this.updateSyncUiState();
+  }
+
+  private openConflictModal(conflicts: string[]): void {
+    if (this.conflictModal) {
+      this.conflictModal.open();
+      return;
+    }
+
+    this.conflictModal = new ConflictResolutionModal(this, conflicts, () => {
+      this.conflictModal = null;
+    });
+    this.conflictModal.open();
   }
 
   private async loadPluginData(): Promise<OctosyncPluginData> {
