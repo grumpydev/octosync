@@ -1,4 +1,4 @@
-import { Notice, TFile, TFolder, Vault } from "obsidian";
+import { FileManager, Notice, TFile, TFolder, Vault } from "obsidian";
 import { GitHubClient, GitHubRequestError } from "./github";
 import { base64ToBytes, bytesToBase64, gitBlobSha } from "./hash";
 import { MetadataStore } from "./metadata";
@@ -7,7 +7,6 @@ import type { DebugLogSink } from "./debug-log";
 
 const RESERVED_PREFIXES = [
   ".git/",
-  ".obsidian/",
   ".trash/",
   ".octosync/",
 ];
@@ -74,9 +73,12 @@ type FolderPlanAction =
   | { type: "updateFolder"; folderPath: string; markerSha: string | null; deleted: boolean }
   | { type: "removeFolder"; folderPath: string };
 
+type IgnorePath = (path: string) => boolean;
+
 export class SyncManager {
   constructor(
     private readonly vault: Vault,
+    private readonly fileManager: FileManager,
     private readonly github: GitHubClient,
     private readonly metadata: MetadataStore,
     private readonly settings: OctosyncSettings,
@@ -129,7 +131,7 @@ export class SyncManager {
     const localEmptyFolders = this.getLocalEmptyFolders();
 
     for (const [path, localFile] of local) {
-      if (shouldIgnorePath(path)) {
+      if (this.shouldIgnorePath(path)) {
         continue;
       }
 
@@ -141,7 +143,7 @@ export class SyncManager {
     }
 
     for (const [path, record] of Object.entries(this.metadata.data.files)) {
-      if (shouldIgnorePath(path)) {
+      if (this.shouldIgnorePath(path)) {
         continue;
       }
 
@@ -157,7 +159,7 @@ export class SyncManager {
     }
 
     for (const [folderPath, record] of Object.entries(this.metadata.data.folders)) {
-      if (shouldIgnorePath(`${folderPath}/`)) {
+      if (this.shouldIgnorePath(`${folderPath}/`)) {
         continue;
       }
 
@@ -178,12 +180,12 @@ export class SyncManager {
     const folderPaths = new Set<string>();
 
     for (const path of paths) {
-      if (!path || shouldIgnorePath(path) || shouldIgnorePath(`${path}/`)) {
+      if (!path || this.shouldIgnorePath(path) || this.shouldIgnorePath(`${path}/`)) {
         continue;
       }
 
       filePaths.add(path);
-      addParentFolders(path, folderPaths);
+      addParentFolders(path, folderPaths, this.shouldIgnorePath);
 
       const existing = this.vault.getAbstractFileByPath(path);
       if (existing instanceof TFolder) {
@@ -219,7 +221,7 @@ export class SyncManager {
     const remote = await this.getRemoteState();
 
     for (const [path, remoteFile] of remote.files) {
-      if (shouldIgnorePath(path)) {
+      if (this.shouldIgnorePath(path)) {
         continue;
       }
 
@@ -229,7 +231,7 @@ export class SyncManager {
     }
 
     for (const [path, record] of Object.entries(this.metadata.data.files)) {
-      if (shouldIgnorePath(path)) {
+      if (this.shouldIgnorePath(path)) {
         continue;
       }
 
@@ -247,7 +249,7 @@ export class SyncManager {
     }
 
     for (const [folderPath, record] of Object.entries(this.metadata.data.folders)) {
-      if (shouldIgnorePath(`${folderPath}/`)) {
+      if (this.shouldIgnorePath(`${folderPath}/`)) {
         continue;
       }
 
@@ -279,8 +281,8 @@ export class SyncManager {
 
     const localFolders = this.getLocalFolders();
     summary.conflicts = [
-      ...findPathShapeConflicts(local, localFolders, remote.files),
-      ...findFileConflicts(allPaths, local, remote.files, this.metadata),
+      ...findPathShapeConflicts(local, localFolders, remote.files, this.shouldIgnorePath),
+      ...findFileConflicts(allPaths, local, remote.files, this.metadata, this.shouldIgnorePath),
     ];
 
     if (summary.conflicts.length > 0) {
@@ -293,7 +295,7 @@ export class SyncManager {
     }
 
     for (const path of allPaths) {
-      if (shouldIgnorePath(path)) {
+      if (this.shouldIgnorePath(path)) {
         continue;
       }
 
@@ -366,6 +368,7 @@ export class SyncManager {
       localFolders,
       local,
       fileActions,
+      this.shouldIgnorePath,
     );
     const folderActions = planEmptyFolderActions(
       postFileLocalState.folders,
@@ -373,6 +376,7 @@ export class SyncManager {
       getRemoteEmptyFolders(remote.files),
       this.metadata,
       summary,
+      this.shouldIgnorePath,
     );
 
     return {
@@ -690,7 +694,7 @@ export class SyncManager {
     const snapshots = new Map<string, LocalFileSnapshot>();
 
     for (const file of this.vault.getFiles()) {
-      if (shouldIgnorePath(file.path)) {
+      if (this.shouldIgnorePath(file.path)) {
         continue;
       }
 
@@ -709,7 +713,7 @@ export class SyncManager {
   private async getLocalFile(path: string): Promise<LocalFileSnapshot | null> {
     const file = this.vault.getAbstractFileByPath(path);
 
-    if (!(file instanceof TFile) || shouldIgnorePath(file.path)) {
+    if (!(file instanceof TFile) || this.shouldIgnorePath(file.path)) {
       return null;
     }
 
@@ -723,7 +727,7 @@ export class SyncManager {
   }
 
   private async hasLocalFolderChange(folderPath: string): Promise<boolean> {
-    if (!folderPath || shouldIgnorePath(`${folderPath}/`)) {
+    if (!folderPath || this.shouldIgnorePath(`${folderPath}/`)) {
       return false;
     }
 
@@ -747,7 +751,7 @@ export class SyncManager {
         continue;
       }
 
-      if (!file.path || file.path === "/" || shouldIgnorePath(`${file.path}/`)) {
+      if (!file.path || file.path === "/" || this.shouldIgnorePath(`${file.path}/`)) {
         continue;
       }
 
@@ -767,7 +771,7 @@ export class SyncManager {
         continue;
       }
 
-      if (!file.path || file.path === "/" || shouldIgnorePath(`${file.path}/`)) {
+      if (!file.path || file.path === "/" || this.shouldIgnorePath(`${file.path}/`)) {
         continue;
       }
 
@@ -813,7 +817,7 @@ export class SyncManager {
           throw error;
         }
 
-        await this.vault.delete(existing);
+        await this.fileManager.trashFile(existing);
         await this.ensureParentFolder(path);
         await this.vault.createBinary(path, bytes);
       }
@@ -829,7 +833,7 @@ export class SyncManager {
   }
 
   private async deleteLocalFile(file: TFile): Promise<void> {
-    await this.vault.delete(file);
+    await this.fileManager.trashFile(file);
   }
 
   private async createLocalConflictCopy(
@@ -900,13 +904,13 @@ export class SyncManager {
       return;
     }
 
-    await this.vault.delete(existing);
+    await this.fileManager.trashFile(existing);
   }
 
   private isLocalFolderEmpty(folder: TFolder): boolean {
     return folder.children.every((child) => {
       const childPath = child instanceof TFolder ? `${child.path}/` : child.path;
-      return shouldIgnorePath(childPath);
+      return this.shouldIgnorePath(childPath);
     });
   }
 
@@ -1000,6 +1004,8 @@ export class SyncManager {
       commit.sha,
     );
   }
+
+  private shouldIgnorePath = (path: string): boolean => shouldIgnorePath(path, this.vault.configDir);
 }
 
 function createEmptySummary(): SyncSummary {
@@ -1045,6 +1051,7 @@ function planPostFileLocalState(
   localFolders: Set<string>,
   localFiles: Map<string, LocalFileSnapshot>,
   actions: FilePlanAction[],
+  shouldIgnore: IgnorePath,
 ): { folders: Set<string>; emptyFolders: Set<string> } {
   const postFiles = new Set(localFiles.keys());
   const postFolders = new Set(localFolders);
@@ -1052,7 +1059,7 @@ function planPostFileLocalState(
   for (const action of actions) {
     if (action.type === "download") {
       postFiles.add(action.path);
-      addParentFolders(action.path, postFolders);
+      addParentFolders(action.path, postFolders, shouldIgnore);
     }
 
     if (action.type === "deleteLocal") {
@@ -1062,7 +1069,7 @@ function planPostFileLocalState(
 
   return {
     folders: postFolders,
-    emptyFolders: getEmptyFolders(postFolders, postFiles),
+    emptyFolders: getEmptyFolders(postFolders, postFiles, shouldIgnore),
   };
 }
 
@@ -1072,6 +1079,7 @@ function planEmptyFolderActions(
   remoteEmptyFolders: Map<string, RemoteFile>,
   metadata: MetadataStore,
   summary: SyncSummary,
+  shouldIgnore: IgnorePath,
 ): FolderPlanAction[] {
   const actions: FolderPlanAction[] = [];
   const allFolders = new Set<string>([
@@ -1081,7 +1089,7 @@ function planEmptyFolderActions(
   ]);
 
   for (const folderPath of allFolders) {
-    if (shouldIgnorePath(`${folderPath}/`)) {
+    if (shouldIgnore(`${folderPath}/`)) {
       continue;
     }
 
@@ -1143,20 +1151,24 @@ function planEmptyFolderActions(
   return actions;
 }
 
-function addParentFolders(path: string, folders: Set<string>): void {
+function addParentFolders(path: string, folders: Set<string>, shouldIgnore: IgnorePath): void {
   const parts = path.split("/").slice(0, -1);
   let current = "";
 
   for (const part of parts) {
     current = current ? `${current}/${part}` : part;
 
-    if (!shouldIgnorePath(`${current}/`)) {
+    if (!shouldIgnore(`${current}/`)) {
       folders.add(current);
     }
   }
 }
 
-function getEmptyFolders(folders: Set<string>, files: Set<string>): Set<string> {
+function getEmptyFolders(
+  folders: Set<string>,
+  files: Set<string>,
+  shouldIgnore: IgnorePath,
+): Set<string> {
   const foldersWithChildren = new Set<string>();
 
   for (const folder of folders) {
@@ -1175,7 +1187,7 @@ function getEmptyFolders(folders: Set<string>, files: Set<string>): Set<string> 
 
   return new Set(
     Array.from(folders).filter(
-      (folder) => !foldersWithChildren.has(folder) && !shouldIgnorePath(`${folder}/`),
+      (folder) => !foldersWithChildren.has(folder) && !shouldIgnore(`${folder}/`),
     ),
   );
 }
@@ -1235,8 +1247,12 @@ export class SyncConflictError extends Error {
   }
 }
 
-export function shouldIgnorePath(path: string): boolean {
+export function shouldIgnorePath(path: string, configDir: string): boolean {
+  const configPrefix = configDir.endsWith("/") ? configDir : `${configDir}/`;
+
   return (
+    path === configDir ||
+    path.startsWith(configPrefix) ||
     RESERVED_FILES.has(path) ||
     isEmptyFolderMarkerPath(path) ||
     RESERVED_PREFIXES.some((prefix) => path.startsWith(prefix))
@@ -1248,11 +1264,12 @@ function findFileConflicts(
   local: Map<string, LocalFileSnapshot>,
   remote: Map<string, RemoteFile>,
   metadata: MetadataStore,
+  shouldIgnore: IgnorePath,
 ): string[] {
   const conflicts: string[] = [];
 
   for (const path of paths) {
-    if (shouldIgnorePath(path)) {
+    if (shouldIgnore(path)) {
       continue;
     }
 
@@ -1268,13 +1285,14 @@ function findPathShapeConflicts(
   localFiles: Map<string, LocalFileSnapshot>,
   localFolders: Set<string>,
   remoteFiles: Map<string, RemoteFile>,
+  shouldIgnore: IgnorePath,
 ): string[] {
   const conflicts = new Set<string>();
-  const remoteFolders = getRemoteFolders(remoteFiles);
+  const remoteFolders = getRemoteFolders(remoteFiles, shouldIgnore);
 
   for (const remoteFolderPath of remoteFolders) {
     for (const ancestorPath of ancestorPathsInclusive(remoteFolderPath)) {
-      if (localFiles.has(ancestorPath) && !shouldIgnorePath(ancestorPath)) {
+      if (localFiles.has(ancestorPath) && !shouldIgnore(ancestorPath)) {
         conflicts.add(ancestorPath);
       }
     }
@@ -1282,7 +1300,7 @@ function findPathShapeConflicts(
 
   for (const localFolderPath of localFolders) {
     for (const ancestorPath of ancestorPathsInclusive(localFolderPath)) {
-      if (remoteFiles.has(ancestorPath) && !shouldIgnorePath(ancestorPath)) {
+      if (remoteFiles.has(ancestorPath) && !shouldIgnore(ancestorPath)) {
         conflicts.add(ancestorPath);
       }
     }
@@ -1291,15 +1309,15 @@ function findPathShapeConflicts(
   return [...conflicts].sort();
 }
 
-function getRemoteFolders(remoteFiles: Map<string, RemoteFile>): Set<string> {
+function getRemoteFolders(remoteFiles: Map<string, RemoteFile>, shouldIgnore: IgnorePath): Set<string> {
   const folders = new Set<string>();
 
   for (const remotePath of remoteFiles.keys()) {
-    addParentFolders(remotePath, folders);
+    addParentFolders(remotePath, folders, shouldIgnore);
   }
 
   for (const folderPath of getRemoteEmptyFolders(remoteFiles).keys()) {
-    if (!shouldIgnorePath(`${folderPath}/`)) {
+    if (!shouldIgnore(`${folderPath}/`)) {
       folders.add(folderPath);
     }
   }
@@ -1461,5 +1479,5 @@ function isNonFastForwardError(error: unknown): boolean {
 }
 
 function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+  return new Promise((resolve) => activeWindow.setTimeout(resolve, milliseconds));
 }

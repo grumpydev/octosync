@@ -1,8 +1,7 @@
-import { App, ButtonComponent, DropdownComponent, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, ButtonComponent, DropdownComponent, Notice, PluginSettingTab, Setting, setIcon } from "obsidian";
 import type OctosyncPlugin from "./main";
 import { createAuthProvider } from "./auth";
 import { GitHubClient } from "./github";
-import { OCTOSYNC_ICON } from "./icons";
 import type { GitHubBranch, GitHubRepository } from "./types";
 
 const SUPPORT_LINKS = {
@@ -57,14 +56,16 @@ export class OctosyncSettingTab extends PluginSettingTab {
   }
 
   private addHeader(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName("Octosync")
+      .setHeading();
+
     const header = containerEl.createDiv({ cls: "octosync-settings-header" });
     const logo = header.createDiv({ cls: "octosync-settings-logo" });
     logo.setAttr("aria-hidden", "true");
-    logo.innerHTML = OCTOSYNC_ICON;
+    setIcon(logo, "octosync-logo");
 
-    const text = header.createDiv();
-    text.createEl("h2", { text: "Octosync" });
-    text.createDiv({
+    header.createDiv({
       cls: "octosync-settings-tagline",
       text: "GitHub sync for desktop and mobile vaults.",
     });

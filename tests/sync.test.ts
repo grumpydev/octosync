@@ -56,21 +56,23 @@ describe("sync helpers", () => {
     );
   });
 
-  it("ignores Obsidian, Git, trash, Octosync, marker, and reserved files", () => {
-    expect(shouldIgnorePath(".git/config")).toBe(true);
-    expect(shouldIgnorePath(".obsidian/workspace.json")).toBe(true);
-    expect(shouldIgnorePath(".trash/deleted.md")).toBe(true);
-    expect(shouldIgnorePath(".octosync/state.json")).toBe(true);
-    expect(shouldIgnorePath(".gitignore")).toBe(true);
-    expect(shouldIgnorePath(".DS_Store")).toBe(true);
-    expect(shouldIgnorePath("empty/.octosync-folder")).toBe(true);
-    expect(shouldIgnorePath("notes/.gitignore")).toBe(false);
-    expect(shouldIgnorePath("notes/today.md")).toBe(false);
+  it("ignores the configured Obsidian config folder, Git, trash, Octosync, marker, and reserved files", () => {
+    expect(shouldIgnorePath(".git/config", ".custom-obsidian")).toBe(true);
+    expect(shouldIgnorePath(".custom-obsidian/workspace.json", ".custom-obsidian")).toBe(true);
+    expect(shouldIgnorePath(".obsidian/workspace.json", ".custom-obsidian")).toBe(false);
+    expect(shouldIgnorePath(".trash/deleted.md", ".custom-obsidian")).toBe(true);
+    expect(shouldIgnorePath(".octosync/state.json", ".custom-obsidian")).toBe(true);
+    expect(shouldIgnorePath(".gitignore", ".custom-obsidian")).toBe(true);
+    expect(shouldIgnorePath(".DS_Store", ".custom-obsidian")).toBe(true);
+    expect(shouldIgnorePath("empty/.octosync-folder", ".custom-obsidian")).toBe(true);
+    expect(shouldIgnorePath("notes/.gitignore", ".custom-obsidian")).toBe(false);
+    expect(shouldIgnorePath("notes/today.md", ".custom-obsidian")).toBe(false);
   });
 });
 
 describe("SyncManager", () => {
   beforeEach(() => {
+    vi.stubGlobal("activeWindow", { setTimeout });
     MockGitHubClient.reset();
   });
 
@@ -623,6 +625,7 @@ describe("SyncManager", () => {
 class MemoryVault {
   private readonly files = new Map<string, { file: TFile; bytes: Uint8Array }>();
   private readonly folders = new Map<string, TFolder>();
+  readonly configDir = ".obsidian";
   failNextModifyBinary: Error | null = null;
 
   getFiles(): TFile[] {
@@ -888,6 +891,7 @@ function createManager(
 ): SyncManager {
   return new SyncManager(
     vault as never,
+    { trashFile: (file: TFile | TFolder) => vault.delete(file) } as never,
     github as unknown as GitHubClient,
     metadata,
     settings,

@@ -194,6 +194,7 @@ export default class OctosyncPlugin extends Plugin {
   private createSyncManager(): SyncManager {
     return new SyncManager(
       this.app.vault,
+      this.app.fileManager,
       new GitHubClient(createAuthProvider(this.settings), (message, data) => {
         this.debugLog.write(message, data);
       }),
@@ -578,7 +579,7 @@ export default class OctosyncPlugin extends Plugin {
   }
 
   private async loadPluginData(): Promise<OctosyncPluginData> {
-    const data = await this.loadData();
+    const data: unknown = await this.loadData();
 
     if (!data || typeof data !== "object") {
       return {};
