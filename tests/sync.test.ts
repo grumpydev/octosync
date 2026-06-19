@@ -72,7 +72,7 @@ describe("sync helpers", () => {
 
 describe("SyncManager", () => {
   beforeEach(() => {
-    vi.stubGlobal("activeWindow", { setTimeout });
+    vi.stubGlobal("window", { setTimeout });
     MockGitHubClient.reset();
   });
 

@@ -57,7 +57,7 @@ export class OctosyncSettingTab extends PluginSettingTab {
 
   private addHeader(containerEl: HTMLElement): void {
     new Setting(containerEl)
-      .setName("Octosync")
+      .setName("GitHub sync")
       .setHeading();
 
     const header = containerEl.createDiv({ cls: "octosync-settings-header" });

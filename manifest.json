@@ -2,7 +2,7 @@
   "id": "octosync",
   "name": "Octosync",
   "version": "1.0.7",
-  "minAppVersion": "1.5.0",
+  "minAppVersion": "1.12.3",
   "description": "Sync your vault directly with GitHub APIs on desktop and mobile.",
   "author": "grumpydev",
   "authorUrl": "https://github.com/grumpydev",
