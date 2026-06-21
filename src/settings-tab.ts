@@ -50,6 +50,7 @@ export class OctosyncSettingTab extends PluginSettingTab {
     }
 
     this.addSyncSettings(containerEl);
+    this.addObsidianSyncSettings(containerEl);
     this.addDebugSettings(containerEl);
     this.addActions(containerEl);
     this.addSupport(containerEl);
@@ -311,6 +312,50 @@ export class OctosyncSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Last sync")
       .setDesc(this.plugin.settings.lastSyncSummary || "No completed sync yet.");
+  }
+
+  private addObsidianSyncSettings(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName("Obsidian config sync")
+      .setHeading();
+
+    new Setting(containerEl)
+      .setName("Sync community plugins")
+      .setDesc(
+        "Sync the .obsidian/plugins folder and community-plugins.json. Enables plugins and their data to roam across devices.",
+      )
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.syncCommunityPlugins)
+          .onChange(async (value) => {
+            this.plugin.settings.syncCommunityPlugins = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Sync themes")
+      .setDesc("Sync the .obsidian/themes folder so custom themes are available on all devices.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.syncThemes)
+          .onChange(async (value) => {
+            this.plugin.settings.syncThemes = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Sync CSS snippets")
+      .setDesc("Sync the .obsidian/snippets folder so custom CSS snippets are available on all devices.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.syncSnippets)
+          .onChange(async (value) => {
+            this.plugin.settings.syncSnippets = value;
+            await this.plugin.saveSettings();
+          });
+      });
   }
 
   private addDebugSettings(containerEl: HTMLElement): void {

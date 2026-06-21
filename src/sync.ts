@@ -1005,7 +1005,7 @@ export class SyncManager {
     );
   }
 
-  private shouldIgnorePath = (path: string): boolean => shouldIgnorePath(path, this.vault.configDir);
+  private shouldIgnorePath = (path: string): boolean => shouldIgnorePath(path, this.vault.configDir, getConfigAllowedPaths(this.settings, this.vault.configDir));
 }
 
 function createEmptySummary(): SyncSummary {
@@ -1247,12 +1247,40 @@ export class SyncConflictError extends Error {
   }
 }
 
-export function shouldIgnorePath(path: string, configDir: string): boolean {
+export function getConfigAllowedPaths(settings: OctosyncSettings, configDir: string): string[] {
+  const paths: string[] = [];
+
+  if (settings.syncCommunityPlugins) {
+    paths.push(`${configDir}/plugins`);
+    paths.push(`${configDir}/community-plugins.json`);
+  }
+
+  if (settings.syncThemes) {
+    paths.push(`${configDir}/themes`);
+  }
+
+  if (settings.syncSnippets) {
+    paths.push(`${configDir}/snippets`);
+  }
+
+  return paths;
+}
+
+export function shouldIgnorePath(path: string, configDir: string, allowedConfigPaths: string[] = []): boolean {
   const configPrefix = configDir.endsWith("/") ? configDir : `${configDir}/`;
 
+  if (path === configDir || path.startsWith(configPrefix)) {
+    if (allowedConfigPaths.some((allowed) => {
+      const allowedPrefix = allowed.endsWith("/") ? allowed : `${allowed}/`;
+      return path === allowed || path.startsWith(allowedPrefix);
+    })) {
+      return false;
+    }
+
+    return true;
+  }
+
   return (
-    path === configDir ||
-    path.startsWith(configPrefix) ||
     RESERVED_FILES.has(path) ||
     isEmptyFolderMarkerPath(path) ||
     RESERVED_PREFIXES.some((prefix) => path.startsWith(prefix))

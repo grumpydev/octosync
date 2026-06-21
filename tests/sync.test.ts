@@ -7,6 +7,7 @@ import {
   SyncConflictError,
   SyncManager,
   formatSummary,
+  getConfigAllowedPaths,
   hasUserVisibleSyncChanges,
   shouldIgnorePath,
 } from "../src/sync";
@@ -67,6 +68,45 @@ describe("sync helpers", () => {
     expect(shouldIgnorePath("empty/.octosync-folder", ".custom-obsidian")).toBe(true);
     expect(shouldIgnorePath("notes/.gitignore", ".custom-obsidian")).toBe(false);
     expect(shouldIgnorePath("notes/today.md", ".custom-obsidian")).toBe(false);
+  });
+
+  it("allows config subpaths that are in the allowedConfigPaths list", () => {
+    const configDir = ".obsidian";
+    const allowed = [".obsidian/plugins", ".obsidian/community-plugins.json"];
+
+    // Allowed paths should not be ignored
+    expect(shouldIgnorePath(".obsidian/plugins", configDir, allowed)).toBe(false);
+    expect(shouldIgnorePath(".obsidian/plugins/some-plugin/main.js", configDir, allowed)).toBe(false);
+    expect(shouldIgnorePath(".obsidian/community-plugins.json", configDir, allowed)).toBe(false);
+
+    // Non-allowed config paths are still ignored
+    expect(shouldIgnorePath(".obsidian/workspace.json", configDir, allowed)).toBe(true);
+    expect(shouldIgnorePath(".obsidian/app.json", configDir, allowed)).toBe(true);
+    expect(shouldIgnorePath(".obsidian/themes/mytheme.css", configDir, allowed)).toBe(true);
+  });
+
+  it("getConfigAllowedPaths returns correct paths based on settings", () => {
+    const configDir = ".obsidian";
+
+    expect(
+      getConfigAllowedPaths({ ...DEFAULT_SETTINGS, syncCommunityPlugins: false, syncThemes: false, syncSnippets: false }, configDir),
+    ).toEqual([]);
+
+    expect(
+      getConfigAllowedPaths({ ...DEFAULT_SETTINGS, syncCommunityPlugins: true }, configDir),
+    ).toEqual([".obsidian/plugins", ".obsidian/community-plugins.json"]);
+
+    expect(
+      getConfigAllowedPaths({ ...DEFAULT_SETTINGS, syncThemes: true }, configDir),
+    ).toEqual([".obsidian/themes"]);
+
+    expect(
+      getConfigAllowedPaths({ ...DEFAULT_SETTINGS, syncSnippets: true }, configDir),
+    ).toEqual([".obsidian/snippets"]);
+
+    expect(
+      getConfigAllowedPaths({ ...DEFAULT_SETTINGS, syncCommunityPlugins: true, syncThemes: true, syncSnippets: true }, configDir),
+    ).toEqual([".obsidian/plugins", ".obsidian/community-plugins.json", ".obsidian/themes", ".obsidian/snippets"]);
   });
 });
 

@@ -15,6 +15,9 @@ export interface OctosyncSettings {
   remoteChangeCheckIntervalMinutes: number;
   syncOnStartup: boolean;
   syncIntervalMinutes: number;
+  syncCommunityPlugins: boolean;
+  syncThemes: boolean;
+  syncSnippets: boolean;
   debugLogging: boolean;
   lastSyncStartedAt: number | null;
   lastSyncCompletedAt: number | null;
@@ -114,6 +117,9 @@ export const DEFAULT_SETTINGS: OctosyncSettings = {
   remoteChangeCheckIntervalMinutes: 15,
   syncOnStartup: false,
   syncIntervalMinutes: 0,
+  syncCommunityPlugins: false,
+  syncThemes: false,
+  syncSnippets: false,
   debugLogging: false,
   lastSyncStartedAt: null,
   lastSyncCompletedAt: null,
