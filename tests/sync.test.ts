@@ -9,6 +9,7 @@ import {
   formatSummary,
   getConfigAllowedPaths,
   hasUserVisibleSyncChanges,
+  isSensitivePluginFilename,
   matchesExcludePattern,
   shouldIgnorePath,
 } from "../src/sync";
@@ -86,17 +87,37 @@ describe("sync helpers", () => {
     expect(shouldIgnorePath(".obsidian/themes/mytheme.css", configDir, allowed)).toBe(true);
   });
 
-  it("always excludes known sensitive plugin filenames even when syncCommunityPlugins is enabled", () => {
+  it("blocks sensitive plugin filenames by pattern even when syncCommunityPlugins is enabled", () => {
     const configDir = ".obsidian";
     const allowed = getConfigAllowedPaths({ ...DEFAULT_SETTINGS, syncCommunityPlugins: true }, configDir);
 
-    // secure-credentials.dat is blocked regardless of allow-list
-    expect(shouldIgnorePath(".obsidian/plugins/github-copilot/secure-credentials.dat", configDir, allowed)).toBe(true);
+    // credential keyword is blocked regardless of which plugin it comes from
+    expect(shouldIgnorePath(".obsidian/plugins/any-plugin/secure-credentials.dat", configDir, allowed)).toBe(true);
+    expect(shouldIgnorePath(".obsidian/plugins/any-plugin/credentials.json", configDir, allowed)).toBe(true);
+    expect(shouldIgnorePath(".obsidian/plugins/any-plugin/user_credentials", configDir, allowed)).toBe(true);
 
-    // Other plugin files are still synced
-    expect(shouldIgnorePath(".obsidian/plugins/github-copilot/main.js", configDir, allowed)).toBe(false);
-    expect(shouldIgnorePath(".obsidian/plugins/github-copilot/data.json", configDir, allowed)).toBe(false);
-    expect(shouldIgnorePath(".obsidian/plugins/github-copilot/manifest.json", configDir, allowed)).toBe(false);
+    // .dat extension is blocked (binary/encrypted stores)
+    expect(shouldIgnorePath(".obsidian/plugins/any-plugin/auth.dat", configDir, allowed)).toBe(true);
+    expect(shouldIgnorePath(".obsidian/plugins/any-plugin/store.dat", configDir, allowed)).toBe(true);
+
+    // Ordinary plugin files are still synced
+    expect(shouldIgnorePath(".obsidian/plugins/any-plugin/main.js", configDir, allowed)).toBe(false);
+    expect(shouldIgnorePath(".obsidian/plugins/any-plugin/data.json", configDir, allowed)).toBe(false);
+    expect(shouldIgnorePath(".obsidian/plugins/any-plugin/manifest.json", configDir, allowed)).toBe(false);
+    expect(shouldIgnorePath(".obsidian/plugins/any-plugin/styles.css", configDir, allowed)).toBe(false);
+  });
+
+  it("isSensitivePluginFilename matches credential and .dat patterns case-insensitively", () => {
+    expect(isSensitivePluginFilename("secure-credentials.dat")).toBe(true);
+    expect(isSensitivePluginFilename("Credentials.json")).toBe(true);
+    expect(isSensitivePluginFilename("USER_CREDENTIAL_STORE")).toBe(true);
+    expect(isSensitivePluginFilename("auth.DAT")).toBe(true);
+    expect(isSensitivePluginFilename("store.dat")).toBe(true);
+
+    expect(isSensitivePluginFilename("main.js")).toBe(false);
+    expect(isSensitivePluginFilename("data.json")).toBe(false);
+    expect(isSensitivePluginFilename("manifest.json")).toBe(false);
+    expect(isSensitivePluginFilename("styles.css")).toBe(false);
   });
 
   it("respects user-defined exclude patterns via shouldIgnorePath", () => {

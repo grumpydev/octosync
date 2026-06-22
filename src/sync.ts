@@ -16,10 +16,16 @@ const RESERVED_FILES = new Set([
   ".DS_Store",
 ]);
 
-// Filenames under .obsidian/plugins/ that contain credentials and must never be synced.
-const SENSITIVE_PLUGIN_FILENAMES = new Set([
-  "secure-credentials.dat",
-]);
+// Patterns matched against the filename (last path segment) of any file under .obsidian/plugins/.
+// Files whose names match are always excluded from sync, regardless of the allow-list.
+const SENSITIVE_PLUGIN_FILENAME_PATTERNS: RegExp[] = [
+  /credential/i, // e.g. secure-credentials.dat, credentials.json
+  /\.dat$/i,     // binary / encrypted data stores commonly used by plugins
+];
+
+export function isSensitivePluginFilename(filename: string): boolean {
+  return SENSITIVE_PLUGIN_FILENAME_PATTERNS.some((pattern) => pattern.test(filename));
+}
 
 const EMPTY_FOLDER_MARKER_NAME = ".octosync-folder";
 const EMPTY_FOLDER_MARKER_CONTENT = "Octosync placeholder for an empty Obsidian folder.\n";
@@ -1283,7 +1289,7 @@ export function shouldIgnorePath(path: string, configDir: string, allowedConfigP
       const pluginsPrefix = `${configDir}/plugins/`;
       const filename = path.split("/").pop() ?? "";
 
-      if (path.startsWith(pluginsPrefix) && SENSITIVE_PLUGIN_FILENAMES.has(filename)) {
+      if (path.startsWith(pluginsPrefix) && isSensitivePluginFilename(filename)) {
         return true;
       }
 
