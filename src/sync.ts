@@ -16,6 +16,23 @@ const RESERVED_FILES = new Set([
   ".DS_Store",
 ]);
 
+// Patterns matched against the filename (last path segment) of any file under .obsidian/plugins/.
+// Files whose names match are always excluded from sync, regardless of the allow-list.
+// Note: most plugins store API keys/tokens inside data.json (the standard Obsidian plugin data
+// file), which is intentionally NOT blocked here so that plugin settings can roam. These patterns
+// target files that exist specifically to hold credentials outside of the normal settings file.
+const SENSITIVE_PLUGIN_FILENAME_PATTERNS: RegExp[] = [
+  /credential/i, // e.g. secure-credentials.dat, credentials.json, user_credential_store
+  /secret/i,     // e.g. client_secret.json, secrets.json (OAuth client secrets, etc.)
+  /\.dat$/i,     // binary / encrypted data stores (used by several plugins as credential vaults)
+  /\.key$/i,     // raw key files (SSH private keys, API key files)
+  /\.pem$/i,     // PEM-encoded private keys or certificates
+];
+
+export function isSensitivePluginFilename(filename: string): boolean {
+  return SENSITIVE_PLUGIN_FILENAME_PATTERNS.some((pattern) => pattern.test(filename));
+}
+
 const EMPTY_FOLDER_MARKER_NAME = ".octosync-folder";
 const EMPTY_FOLDER_MARKER_CONTENT = "Octosync placeholder for an empty Obsidian folder.\n";
 
@@ -1005,7 +1022,7 @@ export class SyncManager {
     );
   }
 
-  private shouldIgnorePath = (path: string): boolean => shouldIgnorePath(path, this.vault.configDir);
+  private shouldIgnorePath = (path: string): boolean => shouldIgnorePath(path, this.vault.configDir, getConfigAllowedPaths(this.settings, this.vault.configDir), this.settings.syncExcludePaths);
 }
 
 function createEmptySummary(): SyncSummary {
@@ -1247,16 +1264,72 @@ export class SyncConflictError extends Error {
   }
 }
 
-export function shouldIgnorePath(path: string, configDir: string): boolean {
+export function getConfigAllowedPaths(settings: OctosyncSettings, configDir: string): string[] {
+  const paths: string[] = [];
+
+  if (settings.syncCommunityPlugins) {
+    paths.push(`${configDir}/plugins`);
+    paths.push(`${configDir}/community-plugins.json`);
+  }
+
+  if (settings.syncThemes) {
+    paths.push(`${configDir}/themes`);
+  }
+
+  if (settings.syncSnippets) {
+    paths.push(`${configDir}/snippets`);
+  }
+
+  return paths;
+}
+
+export function shouldIgnorePath(path: string, configDir: string, allowedConfigPaths: string[] = [], excludePatterns: string[] = []): boolean {
   const configPrefix = configDir.endsWith("/") ? configDir : `${configDir}/`;
 
+  if (path === configDir || path.startsWith(configPrefix)) {
+    if (allowedConfigPaths.some((allowed) => {
+      const allowedPrefix = allowed.endsWith("/") ? allowed : `${allowed}/`;
+      return path === allowed || path.startsWith(allowedPrefix);
+    })) {
+      // Path is in the allow-list, but still enforce sensitive-file and user-defined exclusions.
+      const pluginsPrefix = `${configDir}/plugins/`;
+      const filename = path.split("/").pop() ?? "";
+
+      if (path.startsWith(pluginsPrefix) && isSensitivePluginFilename(filename)) {
+        return true;
+      }
+
+      if (excludePatterns.some((pattern) => matchesExcludePattern(path, pattern))) {
+        return true;
+      }
+
+      return false;
+    }
+
+    return true;
+  }
+
   return (
-    path === configDir ||
-    path.startsWith(configPrefix) ||
     RESERVED_FILES.has(path) ||
     isEmptyFolderMarkerPath(path) ||
     RESERVED_PREFIXES.some((prefix) => path.startsWith(prefix))
   );
+}
+
+/**
+ * Returns true when `path` matches `pattern`.
+ * - If `pattern` contains a `/`, it is treated as a path prefix: the path must equal the pattern
+ *   or start with `pattern + "/"`.
+ * - Otherwise the pattern is treated as a filename and is compared to the last path segment.
+ */
+export function matchesExcludePattern(path: string, pattern: string): boolean {
+  if (pattern.includes("/")) {
+    const prefix = pattern.endsWith("/") ? pattern : `${pattern}/`;
+    return path === pattern || path.startsWith(prefix);
+  }
+
+  const filename = path.split("/").pop() ?? "";
+  return filename === pattern;
 }
 
 function findFileConflicts(
