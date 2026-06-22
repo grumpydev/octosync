@@ -18,9 +18,15 @@ const RESERVED_FILES = new Set([
 
 // Patterns matched against the filename (last path segment) of any file under .obsidian/plugins/.
 // Files whose names match are always excluded from sync, regardless of the allow-list.
+// Note: most plugins store API keys/tokens inside data.json (the standard Obsidian plugin data
+// file), which is intentionally NOT blocked here so that plugin settings can roam. These patterns
+// target files that exist specifically to hold credentials outside of the normal settings file.
 const SENSITIVE_PLUGIN_FILENAME_PATTERNS: RegExp[] = [
-  /credential/i, // e.g. secure-credentials.dat, credentials.json
-  /\.dat$/i,     // binary / encrypted data stores commonly used by plugins
+  /credential/i, // e.g. secure-credentials.dat, credentials.json, user_credential_store
+  /secret/i,     // e.g. client_secret.json, secrets.json (OAuth client secrets, etc.)
+  /\.dat$/i,     // binary / encrypted data stores (used by several plugins as credential vaults)
+  /\.key$/i,     // raw key files (SSH private keys, API key files)
+  /\.pem$/i,     // PEM-encoded private keys or certificates
 ];
 
 export function isSensitivePluginFilename(filename: string): boolean {

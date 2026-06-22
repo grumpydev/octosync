@@ -114,6 +114,20 @@ describe("sync helpers", () => {
     expect(isSensitivePluginFilename("auth.DAT")).toBe(true);
     expect(isSensitivePluginFilename("store.dat")).toBe(true);
 
+    // secret
+    expect(isSensitivePluginFilename("client_secret.json")).toBe(true);
+    expect(isSensitivePluginFilename("SECRETS.json")).toBe(true);
+    expect(isSensitivePluginFilename("my-secret-key")).toBe(true);
+
+    // .key
+    expect(isSensitivePluginFilename("private.key")).toBe(true);
+    expect(isSensitivePluginFilename("api.KEY")).toBe(true);
+
+    // .pem
+    expect(isSensitivePluginFilename("private.pem")).toBe(true);
+    expect(isSensitivePluginFilename("cert.PEM")).toBe(true);
+
+    // Safe plugin files are not blocked
     expect(isSensitivePluginFilename("main.js")).toBe(false);
     expect(isSensitivePluginFilename("data.json")).toBe(false);
     expect(isSensitivePluginFilename("manifest.json")).toBe(false);
