@@ -202,6 +202,35 @@ describe("SyncManager", () => {
     expect(github.remote.has(".obsidian/workspace.json")).toBe(false);
   });
 
+  it("downloads allowed config-dir files through the adapter", async () => {
+    const vault = new MemoryVault();
+    const github = new MockGitHubClient();
+    const metadata = await createMetadata();
+
+    const themeSha = await github.addRemoteFile(".obsidian/themes/my-theme/theme.css", "body { color: blue; }");
+    await github.addRemoteFile(".obsidian/workspace.json", "{\"main\":{\"id\":\"main\"}}");
+
+    const syncSettings = {
+      ...settings,
+      syncThemes: true,
+    };
+    const manager = new SyncManager(
+      vault as never,
+      { trashFile: (file: TFile | TFolder) => vault.delete(file) } as never,
+      github as unknown as GitHubClient,
+      metadata,
+      syncSettings,
+      undefined,
+    );
+    const summary = await manager.sync();
+
+    expect(summary.downloaded).toBe(1);
+    expect(vault.readText(".obsidian/themes/my-theme/theme.css")).toBe("body { color: blue; }");
+    expect(metadata.get(".obsidian/themes/my-theme/theme.css")?.sha).toBe(themeSha);
+    expect(vault.exists(".obsidian/workspace.json")).toBe(false);
+    expect(vault.getFiles().some((file) => file.path.startsWith(".obsidian/"))).toBe(false);
+  });
+
   it("plans sync without changing local files, remote files, or metadata", async () => {
     const vault = new MemoryVault();
     const github = new MockGitHubClient();
