@@ -5,6 +5,7 @@ import { DebugLog, type DebugLogEntry } from "./debug-log";
 import { GitHubClient } from "./github";
 import { OCTOSYNC_ICON } from "./icons";
 import { MetadataStore } from "./metadata";
+import { installMissingCommunityPlugins } from "./plugin-installer";
 import { OctosyncSettingTab } from "./settings-tab";
 import {
   type ConflictResolution,
@@ -459,6 +460,10 @@ export default class OctosyncPlugin extends Plugin {
       progressNotice?.hide();
       notifySummary(summary);
       this.dirtyLocalPaths.clear();
+
+      if (this.settings.syncCommunityPlugins) {
+        await this.installMissingCommunityPlugins();
+      }
       await this.refreshPostOperationIndicators();
     } catch (error) {
       if (error instanceof SyncConflictError) {
@@ -483,6 +488,24 @@ export default class OctosyncPlugin extends Plugin {
       new Notice(`Octosync failed: ${message}`, 8000);
       console.error("Octosync failed", error);
       await this.refreshPostOperationIndicators();
+    }
+  }
+
+  private async installMissingCommunityPlugins(): Promise<void> {
+    try {
+      const { installed, failed } = await installMissingCommunityPlugins(
+        this.app.vault,
+        this.app.vault.configDir,
+        (message, data) => this.debugLog.write(message, data),
+      );
+      if (installed.length > 0) {
+        new Notice(`Octosync: installed ${installed.length} community plugin(s): ${installed.join(", ")}`);
+      }
+      if (failed.length > 0) {
+        new Notice(`Octosync: could not install ${failed.length} community plugin(s): ${failed.join(", ")}`, 8000);
+      }
+    } catch (error) {
+      this.debugLog.write("plugin-install.error", { message: error instanceof Error ? error.message : String(error) });
     }
   }
 
