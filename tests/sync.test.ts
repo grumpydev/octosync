@@ -165,6 +165,72 @@ describe("SyncManager", () => {
     expect(github.commits).toBe(1);
   });
 
+  it("syncs allowed config-dir files when the corresponding setting is enabled", async () => {
+    const vault = new MemoryVault();
+    const github = new MockGitHubClient();
+    const metadata = await createMetadata();
+
+    vault.addFile("note.md", "vault note");
+    vault.addFile(".obsidian/community-plugins.json", '["dataview"]');
+    vault.addFile(".obsidian/themes/my-theme/theme.css", "body { color: red; }");
+    vault.addFile(".obsidian/snippets/custom.css", ".highlight { background: yellow; }");
+    vault.addFile(".obsidian/workspace.json", '{"main":{"id":"main"}}');
+
+    const syncSettings = {
+      ...settings,
+      syncCommunityPlugins: true,
+      syncThemes: true,
+      syncSnippets: true,
+    };
+    const manager = new SyncManager(
+      vault as never,
+      { trashFile: (file: TFile | TFolder) => vault.delete(file) } as never,
+      github as unknown as GitHubClient,
+      metadata,
+      syncSettings,
+      undefined,
+    );
+    const summary = await manager.sync();
+
+    // vault note + community-plugins.json + theme + snippet = 4 uploads
+    expect(summary.uploaded).toBe(4);
+    expect(await github.readRemoteText("note.md")).toBe("vault note");
+    expect(await github.readRemoteText(".obsidian/community-plugins.json")).toBe('["dataview"]');
+    expect(await github.readRemoteText(".obsidian/themes/my-theme/theme.css")).toBe("body { color: red; }");
+    expect(await github.readRemoteText(".obsidian/snippets/custom.css")).toBe(".highlight { background: yellow; }");
+    // workspace.json is not in the allow-list and must not have synced
+    expect(github.remote.has(".obsidian/workspace.json")).toBe(false);
+  });
+
+  it("downloads allowed config-dir files through the adapter", async () => {
+    const vault = new MemoryVault();
+    const github = new MockGitHubClient();
+    const metadata = await createMetadata();
+
+    const themeSha = await github.addRemoteFile(".obsidian/themes/my-theme/theme.css", "body { color: blue; }");
+    await github.addRemoteFile(".obsidian/workspace.json", "{\"main\":{\"id\":\"main\"}}");
+
+    const syncSettings = {
+      ...settings,
+      syncThemes: true,
+    };
+    const manager = new SyncManager(
+      vault as never,
+      { trashFile: (file: TFile | TFolder) => vault.delete(file) } as never,
+      github as unknown as GitHubClient,
+      metadata,
+      syncSettings,
+      undefined,
+    );
+    const summary = await manager.sync();
+
+    expect(summary.downloaded).toBe(1);
+    expect(vault.readText(".obsidian/themes/my-theme/theme.css")).toBe("body { color: blue; }");
+    expect(metadata.get(".obsidian/themes/my-theme/theme.css")?.sha).toBe(themeSha);
+    expect(vault.exists(".obsidian/workspace.json")).toBe(false);
+    expect(vault.getFiles().some((file) => file.path.startsWith(".obsidian/"))).toBe(false);
+  });
+
   it("plans sync without changing local files, remote files, or metadata", async () => {
     const vault = new MemoryVault();
     const github = new MockGitHubClient();
@@ -703,13 +769,70 @@ class MemoryVault {
   readonly configDir = ".obsidian";
   failNextModifyBinary: Error | null = null;
 
+  // Mirrors real Obsidian behaviour: vault.getFiles() does not return files inside
+  // the hidden config directory. Config-dir files are only accessible via adapter.
   getFiles(): TFile[] {
-    return Array.from(this.files.values()).map((entry) => entry.file);
+    const configPrefix = `${this.configDir}/`;
+    return Array.from(this.files.values())
+      .filter((entry) => !entry.file.path.startsWith(configPrefix))
+      .map((entry) => entry.file);
   }
 
   getAllLoadedFiles(): Array<TFile | TFolder> {
     return [...this.folders.values(), ...this.getFiles()];
   }
+
+  readonly adapter = {
+    stat: async (path: string): Promise<{ type: "file" | "folder"; ctime: number; mtime: number; size: number } | null> => {
+      if (this.files.has(path)) return { type: "file", ctime: 0, mtime: 0, size: this.files.get(path)!.bytes.length };
+      if (this.folders.has(path)) return { type: "folder", ctime: 0, mtime: 0, size: 0 };
+      return null;
+    },
+    list: async (path: string): Promise<{ files: string[]; folders: string[] }> => {
+      const prefix = path.endsWith("/") ? path : `${path}/`;
+      const files: string[] = [];
+      const folders: string[] = [];
+      for (const filePath of this.files.keys()) {
+        if (filePath.startsWith(prefix) && !filePath.slice(prefix.length).includes("/")) {
+          files.push(filePath);
+        }
+      }
+      for (const folderPath of this.folders.keys()) {
+        if (folderPath.startsWith(prefix) && !folderPath.slice(prefix.length).includes("/")) {
+          folders.push(folderPath);
+        }
+      }
+      return { files, folders };
+    },
+    readBinary: async (path: string): Promise<ArrayBuffer> => {
+      const entry = this.files.get(path);
+      if (!entry) throw new Error(`Missing file ${path}`);
+      return cloneBuffer(entry.bytes);
+    },
+    writeBinary: async (path: string, bytes: ArrayBuffer): Promise<void> => {
+      const existing = this.files.get(path);
+      if (existing) {
+        this.files.set(path, { file: existing.file, bytes: new Uint8Array(bytes.slice(0)) });
+      } else {
+        const file = new TFile(path);
+        this.files.set(path, { file, bytes: new Uint8Array(bytes.slice(0)) });
+        this.addChild(file);
+      }
+    },
+    exists: async (path: string): Promise<boolean> => {
+      return this.files.has(path) || this.folders.has(path);
+    },
+    mkdir: async (path: string): Promise<void> => {
+      this.addFolder(path);
+    },
+    remove: async (path: string): Promise<void> => {
+      const entry = this.files.get(path);
+      if (entry) {
+        this.files.delete(path);
+        this.removeChild(entry.file);
+      }
+    },
+  };
 
   async readBinary(file: TFile): Promise<ArrayBuffer> {
     const entry = this.files.get(file.path);
