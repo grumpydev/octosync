@@ -63,7 +63,7 @@ export async function installMissingCommunityPlugins(
     }
 
     try {
-      await installPlugin(vault, configDir, entry.repo);
+      await installPlugin(vault, configDir, id, entry.repo);
       result.installed.push(id);
     } catch (error) {
       result.failed.push(id);
@@ -74,17 +74,25 @@ export async function installMissingCommunityPlugins(
   return result;
 }
 
-async function installPlugin(vault: Vault, configDir: string, repo: string): Promise<void> {
+async function installPlugin(vault: Vault, configDir: string, expectedId: string, repo: string): Promise<void> {
   const manifestText = await fetchText(`https://raw.githubusercontent.com/${repo}/HEAD/manifest.json`);
   const manifest = JSON.parse(manifestText) as PluginManifest;
-  const pluginDir = `${configDir}/plugins/${manifest.id}`;
+  if (manifest.id !== expectedId) {
+    // Guards against a registry entry pointing at a repo whose manifest id no longer
+    // matches, which would otherwise install into the wrong folder and retry forever.
+    throw new Error(`Manifest id "${manifest.id}" from ${repo} does not match expected id "${expectedId}"`);
+  }
 
+  const pluginDir = `${configDir}/plugins/${expectedId}`;
   if (!(await vault.adapter.exists(pluginDir))) {
     await vault.adapter.mkdir(pluginDir);
   }
 
+  // manifest.json is written last, and detection above only looks for manifest.json,
+  // so a failure partway through (e.g. main.js download fails) leaves the plugin
+  // looking "missing" and eligible for retry on the next sync rather than stuck
+  // half-installed.
   const releaseBase = `https://github.com/${repo}/releases/download/${manifest.version}`;
-  await vault.adapter.write(`${pluginDir}/manifest.json`, manifestText);
   await vault.adapter.write(`${pluginDir}/main.js`, await fetchText(`${releaseBase}/main.js`));
 
   try {
@@ -92,6 +100,8 @@ async function installPlugin(vault: Vault, configDir: string, repo: string): Pro
   } catch {
     // styles.css is optional; not every plugin ships one.
   }
+
+  await vault.adapter.write(`${pluginDir}/manifest.json`, manifestText);
 }
 
 async function readEnabledPluginIds(vault: Vault, configDir: string): Promise<string[]> {

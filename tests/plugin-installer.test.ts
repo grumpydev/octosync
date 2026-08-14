@@ -123,4 +123,51 @@ describe("installMissingCommunityPlugins", () => {
 
     setRequestUrlMock(null);
   });
+
+  it("stays retryable and doesn't write manifest.json when main.js download fails", async () => {
+    const vault = createFakeVault({
+      [`${CONFIG_DIR}/community-plugins.json`]: JSON.stringify(["dataview"]),
+    });
+
+    setRequestUrlMock(async (request) => {
+      if (request.url.endsWith("/obsidian-releases/HEAD/community-plugins.json")) {
+        return textResponse(200, JSON.stringify([{ id: "dataview", repo: "blacksmithgu/obsidian-dataview" }]));
+      }
+      if (request.url.endsWith("/blacksmithgu/obsidian-dataview/HEAD/manifest.json")) {
+        return textResponse(200, JSON.stringify({ id: "dataview", version: "0.5.68" }));
+      }
+      return textResponse(500, "");
+    });
+
+    const result = await installMissingCommunityPlugins(vault, CONFIG_DIR);
+
+    expect(result).toEqual({ installed: [], failed: ["dataview"] });
+    expect(vault.store.has(`${CONFIG_DIR}/plugins/dataview/manifest.json`)).toBe(false);
+
+    setRequestUrlMock(null);
+  });
+
+  it("rejects a registry entry whose manifest id doesn't match the enabled id", async () => {
+    const vault = createFakeVault({
+      [`${CONFIG_DIR}/community-plugins.json`]: JSON.stringify(["dataview"]),
+    });
+
+    setRequestUrlMock(async (request) => {
+      if (request.url.endsWith("/obsidian-releases/HEAD/community-plugins.json")) {
+        return textResponse(200, JSON.stringify([{ id: "dataview", repo: "someone/wrong-repo" }]));
+      }
+      if (request.url.endsWith("/someone/wrong-repo/HEAD/manifest.json")) {
+        return textResponse(200, JSON.stringify({ id: "not-dataview", version: "1.0.0" }));
+      }
+      return textResponse(404, "");
+    });
+
+    const result = await installMissingCommunityPlugins(vault, CONFIG_DIR);
+
+    expect(result).toEqual({ installed: [], failed: ["dataview"] });
+    expect(vault.store.has(`${CONFIG_DIR}/plugins/dataview`)).toBe(false);
+    expect(vault.store.has(`${CONFIG_DIR}/plugins/not-dataview`)).toBe(false);
+
+    setRequestUrlMock(null);
+  });
 });
