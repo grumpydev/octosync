@@ -359,10 +359,31 @@ export class OctosyncSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName("Extra hidden directories")
+      .setDesc(
+        "One top-level hidden directory per line (e.g. .copilot, .claude, .codex). " +
+        "These directories are invisible to Obsidian's vault index and are not synced unless listed here.",
+      );
+
+    const extraHiddenArea = containerEl.createEl("textarea", {
+      cls: "octosync-exclude-paths",
+    });
+    extraHiddenArea.rows = 3;
+    extraHiddenArea.placeholder = ".copilot\n.claude\n.codex";
+    extraHiddenArea.value = this.plugin.settings.syncExtraHiddenDirs.join("\n");
+    extraHiddenArea.addEventListener("change", () => {
+      this.plugin.settings.syncExtraHiddenDirs = extraHiddenArea.value
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      void this.plugin.saveSettings();
+    });
+
+    new Setting(containerEl)
       .setName("Exclude patterns")
       .setDesc(
-        "One path or filename per line. Patterns apply only to the Obsidian config paths enabled above. " +
-        `A pattern with a / is matched as a path prefix (e.g. ${configDir}/themes/my-theme); a plain filename (no /) matches that filename within any synced config path.`,
+        "One path or filename per line. Patterns apply to the Obsidian config paths and extra hidden directories enabled above. " +
+        `A pattern with a / is matched as a path prefix (e.g. ${configDir}/themes/my-theme); a plain filename (no /) matches that filename within any synced path.`,
       );
 
     const excludeArea = containerEl.createEl("textarea", {
