@@ -41,6 +41,8 @@ Manual mode can separately check GitHub for remote changes on an interval. That 
 
 ![Octosync settings screen](docs/octosync-settings.png)
 
+**Sync community plugins** syncs `community-plugins.json` (the enabled-plugin ID list) and, after each sync, downloads and installs any enabled plugin that is missing locally. Plugin code (`manifest.json`, `main.js`, `styles.css`) is fetched from the plugin's own GitHub release, resolved via the official Obsidian community plugin registry — the same source Obsidian's built-in installer uses. Plugin data folders (settings, API keys/tokens) are never synced or downloaded.
+
 ## Safety Net
 
 Sync tools need a high bar because mistakes can damage a vault. Octosync includes unit tests for the sync engine and GitHub client, plus an Obsidian end-to-end suite that launches a disposable vault against a temporary GitHub branch.

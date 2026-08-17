@@ -323,7 +323,7 @@ export class OctosyncSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Sync community plugins")
       .setDesc(
-        "Sync community-plugins.json so new devices know which plugins to install. Plugin data folders are not synced to avoid accidentally sharing API keys or tokens stored in plugin settings.",
+        "Sync community-plugins.json and automatically install any enabled plugin missing locally by downloading its code from the official Obsidian community plugin registry and the plugin's own GitHub releases. Plugin data folders (e.g. settings, API keys/tokens) are never synced or downloaded.",
       )
       .addToggle((toggle) => {
         toggle
