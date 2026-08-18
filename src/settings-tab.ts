@@ -2,6 +2,7 @@ import { App, ButtonComponent, DropdownComponent, Notice, PluginSettingTab, Sett
 import type OctosyncPlugin from "./main";
 import { createAuthProvider } from "./auth";
 import { GitHubClient } from "./github";
+import { isValidExtraHiddenDir } from "./sync";
 import type { GitHubBranch, GitHubRepository } from "./types";
 
 const SUPPORT_LINKS = {
@@ -375,7 +376,7 @@ export class OctosyncSettingTab extends PluginSettingTab {
       this.plugin.settings.syncExtraHiddenDirs = extraHiddenArea.value
         .split("\n")
         .map((line) => line.trim())
-        .filter((line) => line.length > 0);
+        .filter((line) => isValidExtraHiddenDir(line));
       void this.plugin.saveSettings();
     });
 

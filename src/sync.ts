@@ -1367,6 +1367,13 @@ export function getConfigAllowedPaths(settings: OctosyncSettings, configDir: str
   return paths;
 }
 
+/** Returns true for a valid syncExtraHiddenDirs entry: a simple hidden dir name with no slashes and not reserved. */
+export function isValidExtraHiddenDir(name: string): boolean {
+  if (!name.startsWith(".") || name.length < 2 || name.includes("/")) return false;
+  const reservedNames = new Set(RESERVED_PREFIXES.map((p) => p.replace(/\/$/, "")));
+  return !reservedNames.has(name);
+}
+
 export function shouldIgnorePath(path: string, configDir: string, allowedConfigPaths: string[] = [], excludePatterns: string[] = [], extraHiddenDirs: string[] = []): boolean {
   const configPrefix = configDir.endsWith("/") ? configDir : `${configDir}/`;
 
@@ -1397,6 +1404,9 @@ export function shouldIgnorePath(path: string, configDir: string, allowedConfigP
   // Block any top-level hidden directory that isn't explicitly opted in.
   const firstSegment = path.split("/")[0];
   if (firstSegment.startsWith(".") && firstSegment !== configDir && path.includes("/")) {
+    // Reserved dirs can never be opted in, regardless of extraHiddenDirs.
+    if (RESERVED_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
+
     const inExtraDir = extraHiddenDirs.some((dir) => {
       const prefix = dir.endsWith("/") ? dir : `${dir}/`;
       return path === dir || path.startsWith(prefix);

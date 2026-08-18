@@ -9,6 +9,7 @@ import {
   formatSummary,
   getConfigAllowedPaths,
   hasUserVisibleSyncChanges,
+  isValidExtraHiddenDir,
   matchesExcludePattern,
   shouldIgnorePath,
 } from "../src/sync";
@@ -144,6 +145,32 @@ describe("sync helpers", () => {
 
     // Top-level hidden file (no slash) is still matched by RESERVED_FILES, not the hidden-dir check
     expect(shouldIgnorePath(".gitignore", configDir, [], [], [])).toBe(true);
+
+    // Reserved dirs (.git, .trash, .octosync) are always blocked even if listed in extraHiddenDirs
+    expect(shouldIgnorePath(".git/config", configDir, [], [], [".git"])).toBe(true);
+    expect(shouldIgnorePath(".trash/deleted.md", configDir, [], [], [".trash"])).toBe(true);
+    expect(shouldIgnorePath(".octosync/state.json", configDir, [], [], [".octosync"])).toBe(true);
+  });
+
+  it("isValidExtraHiddenDir accepts simple hidden names and rejects reserved/invalid entries", () => {
+    // Valid
+    expect(isValidExtraHiddenDir(".copilot")).toBe(true);
+    expect(isValidExtraHiddenDir(".claude")).toBe(true);
+    expect(isValidExtraHiddenDir(".codex")).toBe(true);
+
+    // Reserved names
+    expect(isValidExtraHiddenDir(".git")).toBe(false);
+    expect(isValidExtraHiddenDir(".trash")).toBe(false);
+    expect(isValidExtraHiddenDir(".octosync")).toBe(false);
+
+    // Nested paths not allowed
+    expect(isValidExtraHiddenDir(".copilot/skills")).toBe(false);
+    expect(isValidExtraHiddenDir(".a/b")).toBe(false);
+
+    // Must start with dot and have at least one character after it
+    expect(isValidExtraHiddenDir("copilot")).toBe(false);
+    expect(isValidExtraHiddenDir(".")).toBe(false);
+    expect(isValidExtraHiddenDir("")).toBe(false);
   });
 
   it("getConfigAllowedPaths returns correct paths based on settings", () => {
