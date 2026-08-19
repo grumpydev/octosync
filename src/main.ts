@@ -10,6 +10,7 @@ import { OctosyncSettingTab } from "./settings-tab";
 import {
   type ConflictResolution,
   formatSummary,
+  getValidExtraHiddenDirs,
   notifySummary,
   SyncConflictError,
   SyncManager,
@@ -107,6 +108,8 @@ export default class OctosyncPlugin extends Plugin {
       ...DEFAULT_SETTINGS,
       ...(data.settings ?? {}),
     };
+    // Re-sanitize in case persisted data was manually edited or predates validation.
+    this.settings.syncExtraHiddenDirs = getValidExtraHiddenDirs(this.settings);
   }
 
   async saveSettings(): Promise<void> {

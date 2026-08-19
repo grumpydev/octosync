@@ -19,6 +19,7 @@ export interface OctosyncSettings {
   syncThemes: boolean;
   syncSnippets: boolean;
   syncExcludePaths: string[];
+  syncExtraHiddenDirs: string[];
   debugLogging: boolean;
   lastSyncStartedAt: number | null;
   lastSyncCompletedAt: number | null;
@@ -122,6 +123,7 @@ export const DEFAULT_SETTINGS: OctosyncSettings = {
   syncThemes: false,
   syncSnippets: false,
   syncExcludePaths: [],
+  syncExtraHiddenDirs: [],
   debugLogging: false,
   lastSyncStartedAt: null,
   lastSyncCompletedAt: null,

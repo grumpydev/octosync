@@ -8,7 +8,9 @@ import {
   SyncManager,
   formatSummary,
   getConfigAllowedPaths,
+  getValidExtraHiddenDirs,
   hasUserVisibleSyncChanges,
+  isValidExtraHiddenDir,
   matchesExcludePattern,
   shouldIgnorePath,
 } from "../src/sync";
@@ -61,7 +63,8 @@ describe("sync helpers", () => {
   it("ignores the configured Obsidian config folder, Git, trash, Octosync, marker, and reserved files", () => {
     expect(shouldIgnorePath(".git/config", ".custom-obsidian")).toBe(true);
     expect(shouldIgnorePath(".custom-obsidian/workspace.json", ".custom-obsidian")).toBe(true);
-    expect(shouldIgnorePath(".obsidian/workspace.json", ".custom-obsidian")).toBe(false);
+    // .obsidian is a hidden dir and not configDir here, so it is blocked unless opted in
+    expect(shouldIgnorePath(".obsidian/workspace.json", ".custom-obsidian")).toBe(true);
     expect(shouldIgnorePath(".trash/deleted.md", ".custom-obsidian")).toBe(true);
     expect(shouldIgnorePath(".octosync/state.json", ".custom-obsidian")).toBe(true);
     expect(shouldIgnorePath(".gitignore", ".custom-obsidian")).toBe(true);
@@ -118,6 +121,69 @@ describe("sync helpers", () => {
     expect(matchesExcludePattern("notes/data.json", "data.json")).toBe(true);
     expect(matchesExcludePattern(".obsidian/plugins/foo/data.json", "data.json")).toBe(true);
     expect(matchesExcludePattern(".obsidian/plugins/foo/main.js", "data.json")).toBe(false);
+  });
+
+  it("blocks unknown top-level hidden dirs but allows configured extra hidden dirs", () => {
+    const configDir = ".obsidian";
+
+    // Hidden dir not in extraHiddenDirs → ignored
+    expect(shouldIgnorePath(".copilot/skills/test.md", configDir, [], [], [])).toBe(true);
+    expect(shouldIgnorePath(".claude/CLAUDE.md", configDir, [], [], [])).toBe(true);
+
+    // Hidden dir in extraHiddenDirs → not ignored
+    expect(shouldIgnorePath(".copilot/skills/test.md", configDir, [], [], [".copilot"])).toBe(false);
+    expect(shouldIgnorePath(".claude/CLAUDE.md", configDir, [], [], [".copilot", ".claude"])).toBe(false);
+
+    // Nested path inside configured extra hidden dir → not ignored
+    expect(shouldIgnorePath(".copilot/skills/sub/deep.md", configDir, [], [], [".copilot"])).toBe(false);
+
+    // Reserved filenames inside extra hidden dirs are still excluded
+    expect(shouldIgnorePath(".copilot/.DS_Store", configDir, [], [], [".copilot"])).toBe(true);
+    expect(shouldIgnorePath(".copilot/empty/.octosync-folder", configDir, [], [], [".copilot"])).toBe(true);
+
+    // Exclude patterns apply inside extra hidden dirs
+    expect(shouldIgnorePath(".copilot/secrets.json", configDir, [], [".copilot/secrets.json"], [".copilot"])).toBe(true);
+
+    // Top-level hidden file (no slash) is still matched by RESERVED_FILES, not the hidden-dir check
+    expect(shouldIgnorePath(".gitignore", configDir, [], [], [])).toBe(true);
+
+    // Reserved dirs (.git, .trash, .octosync) are always blocked even if listed in extraHiddenDirs
+    expect(shouldIgnorePath(".git/config", configDir, [], [], [".git"])).toBe(true);
+    expect(shouldIgnorePath(".trash/deleted.md", configDir, [], [], [".trash"])).toBe(true);
+    expect(shouldIgnorePath(".octosync/state.json", configDir, [], [], [".octosync"])).toBe(true);
+  });
+
+  it("isValidExtraHiddenDir accepts simple hidden names and rejects reserved/invalid entries", () => {
+    // Valid
+    expect(isValidExtraHiddenDir(".copilot")).toBe(true);
+    expect(isValidExtraHiddenDir(".claude")).toBe(true);
+    expect(isValidExtraHiddenDir(".codex")).toBe(true);
+
+    // Reserved names
+    expect(isValidExtraHiddenDir(".git")).toBe(false);
+    expect(isValidExtraHiddenDir(".trash")).toBe(false);
+    expect(isValidExtraHiddenDir(".octosync")).toBe(false);
+
+    // Nested paths not allowed
+    expect(isValidExtraHiddenDir(".copilot/skills")).toBe(false);
+    expect(isValidExtraHiddenDir(".a/b")).toBe(false);
+
+    // Must start with dot and have at least one character after it
+    expect(isValidExtraHiddenDir("copilot")).toBe(false);
+    expect(isValidExtraHiddenDir(".")).toBe(false);
+    expect(isValidExtraHiddenDir("")).toBe(false);
+
+    // Parent-directory traversal must be rejected explicitly
+    expect(isValidExtraHiddenDir("..")).toBe(false);
+  });
+
+  it("getValidExtraHiddenDirs sanitizes tampered or manually-edited persisted settings", () => {
+    const dirtySettings: OctosyncSettings = {
+      ...DEFAULT_SETTINGS,
+      syncExtraHiddenDirs: [".copilot", "..", ".git", ".claude/skills", "not-hidden", ".claude"],
+    };
+
+    expect(getValidExtraHiddenDirs(dirtySettings)).toEqual([".copilot", ".claude"]);
   });
 
   it("getConfigAllowedPaths returns correct paths based on settings", () => {
@@ -229,6 +295,95 @@ describe("SyncManager", () => {
     expect(metadata.get(".obsidian/themes/my-theme/theme.css")?.sha).toBe(themeSha);
     expect(vault.exists(".obsidian/workspace.json")).toBe(false);
     expect(vault.getFiles().some((file) => file.path.startsWith(".obsidian/"))).toBe(false);
+  });
+
+  it("uploads local extra hidden dir files through the adapter", async () => {
+    const vault = new MemoryVault();
+    const github = new MockGitHubClient();
+    const metadata = await createMetadata();
+
+    vault.addFile("note.md", "vault note");
+    vault.addFile(".copilot/skills/SKILL.md", "# My skill");
+    vault.addFile(".claude/CLAUDE.md", "# Claude config");
+    vault.addFile(".other-hidden/file.md", "should not sync");
+
+    const syncSettings = {
+      ...settings,
+      syncExtraHiddenDirs: [".copilot", ".claude"],
+    };
+    const manager = new SyncManager(
+      vault as never,
+      { trashFile: (file: TFile | TFolder) => vault.delete(file) } as never,
+      github as unknown as GitHubClient,
+      metadata,
+      syncSettings,
+      undefined,
+    );
+    const summary = await manager.sync();
+
+    // note + .copilot/skills/SKILL.md + .claude/CLAUDE.md = 3 uploads
+    expect(summary.uploaded).toBe(3);
+    expect(await github.readRemoteText(".copilot/skills/SKILL.md")).toBe("# My skill");
+    expect(await github.readRemoteText(".claude/CLAUDE.md")).toBe("# Claude config");
+    // .other-hidden is not configured and must not have synced
+    expect(github.remote.has(".other-hidden/file.md")).toBe(false);
+    // extra hidden dir files must not appear in vault.getFiles()
+    expect(vault.getFiles().some((f) => f.path.startsWith("."))).toBe(false);
+  });
+
+  it("downloads remote extra hidden dir files through the adapter", async () => {
+    const vault = new MemoryVault();
+    const github = new MockGitHubClient();
+    const metadata = await createMetadata();
+
+    const skillSha = await github.addRemoteFile(".copilot/skills/SKILL.md", "# Remote skill");
+    await github.addRemoteFile(".other-hidden/ignore.md", "should not download");
+
+    const syncSettings = {
+      ...settings,
+      syncExtraHiddenDirs: [".copilot"],
+    };
+    const manager = new SyncManager(
+      vault as never,
+      { trashFile: (file: TFile | TFolder) => vault.delete(file) } as never,
+      github as unknown as GitHubClient,
+      metadata,
+      syncSettings,
+      undefined,
+    );
+    const summary = await manager.sync();
+
+    expect(summary.downloaded).toBe(1);
+    expect(vault.readText(".copilot/skills/SKILL.md")).toBe("# Remote skill");
+    expect(metadata.get(".copilot/skills/SKILL.md")?.sha).toBe(skillSha);
+    // .other-hidden is not configured and must not be downloaded
+    expect(vault.exists(".other-hidden/ignore.md")).toBe(false);
+  });
+
+  it("ignores a tampered '..' entry in syncExtraHiddenDirs instead of treating it as an adapter path", async () => {
+    const vault = new MemoryVault();
+    const github = new MockGitHubClient();
+    const metadata = await createMetadata();
+
+    // Settings bypassing the settings-tab UI validation (e.g. manually edited plugin data).
+    await github.addRemoteFile("../outside-vault.md", "should never be written");
+
+    const syncSettings = {
+      ...settings,
+      syncExtraHiddenDirs: [".."],
+    };
+    const manager = new SyncManager(
+      vault as never,
+      { trashFile: (file: TFile | TFolder) => vault.delete(file) } as never,
+      github as unknown as GitHubClient,
+      metadata,
+      syncSettings,
+      undefined,
+    );
+    const summary = await manager.sync();
+
+    expect(summary.downloaded).toBe(0);
+    expect(vault.exists("../outside-vault.md")).toBe(false);
   });
 
   it("plans sync without changing local files, remote files, or metadata", async () => {
@@ -770,11 +925,11 @@ class MemoryVault {
   failNextModifyBinary: Error | null = null;
 
   // Mirrors real Obsidian behaviour: vault.getFiles() does not return files inside
-  // the hidden config directory. Config-dir files are only accessible via adapter.
+  // any hidden top-level directory (including the config directory). Those paths are
+  // only accessible via the adapter.
   getFiles(): TFile[] {
-    const configPrefix = `${this.configDir}/`;
     return Array.from(this.files.values())
-      .filter((entry) => !entry.file.path.startsWith(configPrefix))
+      .filter((entry) => !entry.file.path.split("/")[0].startsWith("."))
       .map((entry) => entry.file);
   }
 

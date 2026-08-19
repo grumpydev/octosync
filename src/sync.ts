@@ -719,6 +719,9 @@ export class SyncManager {
     for (const allowedPath of allowedPaths) {
       await this.scanAdapterPath(snapshots, allowedPath);
     }
+    for (const dir of getValidExtraHiddenDirs(this.settings)) {
+      await this.scanAdapterPath(snapshots, dir);
+    }
   }
 
   private async scanAdapterPath(snapshots: Map<string, LocalFileSnapshot>, path: string): Promise<void> {
@@ -750,7 +753,7 @@ export class SyncManager {
   }
 
   private async getLocalFile(path: string): Promise<LocalFileSnapshot | null> {
-    if (this.isConfigDirPath(path)) {
+    if (this.isAdapterPath(path)) {
       if (this.shouldIgnorePath(path)) {
         return null;
       }
@@ -858,7 +861,7 @@ export class SyncManager {
   }
 
   private async writeBlob(path: string, bytes: ArrayBuffer): Promise<void> {
-    if (this.isConfigDirPath(path)) {
+    if (this.isAdapterPath(path)) {
       await this.ensureParentFolderAdapter(path);
       await this.vault.adapter.writeBinary(path, bytes);
       return;
@@ -901,7 +904,7 @@ export class SyncManager {
     file: LocalFileSnapshot,
   ): Promise<{ path: string; bytes: ArrayBuffer }> {
     const conflictPath = await this.nextConflictPath(file.path);
-    if (this.isConfigDirPath(conflictPath)) {
+    if (this.isAdapterPath(conflictPath)) {
       await this.ensureParentFolderAdapter(conflictPath);
       await this.vault.adapter.writeBinary(conflictPath, file.bytes);
     } else {
@@ -940,7 +943,7 @@ export class SyncManager {
   }
 
   private async ensureFolder(path: string): Promise<void> {
-    if (this.isConfigDirPath(path)) {
+    if (this.isAdapterPath(path)) {
       await this.ensureParentFolderAdapter(path);
       if (!await this.vault.adapter.exists(path)) {
         await this.vault.adapter.mkdir(path);
@@ -1025,6 +1028,14 @@ export class SyncManager {
     return path === this.vault.configDir || path.startsWith(configPrefix);
   }
 
+  private isAdapterPath(path: string): boolean {
+    if (this.isConfigDirPath(path)) return true;
+    return getValidExtraHiddenDirs(this.settings).some((dir) => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return path === dir || path.startsWith(prefix);
+    });
+  }
+
   private async commitTreeUpdates(
     remote: RemoteState,
     updates: Map<string, string | null>,
@@ -1096,7 +1107,7 @@ export class SyncManager {
     );
   }
 
-  private shouldIgnorePath = (path: string): boolean => shouldIgnorePath(path, this.vault.configDir, getConfigAllowedPaths(this.settings, this.vault.configDir), this.settings.syncExcludePaths);
+  private shouldIgnorePath = (path: string): boolean => shouldIgnorePath(path, this.vault.configDir, getConfigAllowedPaths(this.settings, this.vault.configDir), this.settings.syncExcludePaths, getValidExtraHiddenDirs(this.settings));
 }
 
 function createEmptySummary(): SyncSummary {
@@ -1356,7 +1367,19 @@ export function getConfigAllowedPaths(settings: OctosyncSettings, configDir: str
   return paths;
 }
 
-export function shouldIgnorePath(path: string, configDir: string, allowedConfigPaths: string[] = [], excludePatterns: string[] = []): boolean {
+/** Returns true for a valid syncExtraHiddenDirs entry: a simple hidden dir name with no slashes and not reserved. */
+export function isValidExtraHiddenDir(name: string): boolean {
+  if (!name.startsWith(".") || name.length < 2 || name.includes("/") || name === "..") return false;
+  const reservedNames = new Set(RESERVED_PREFIXES.map((p) => p.replace(/\/$/, "")));
+  return !reservedNames.has(name);
+}
+
+/** Sanitizes syncExtraHiddenDirs at the point of use so tampered or manually-edited persisted settings can't bypass UI validation. */
+export function getValidExtraHiddenDirs(settings: OctosyncSettings): string[] {
+  return settings.syncExtraHiddenDirs.filter(isValidExtraHiddenDir);
+}
+
+export function shouldIgnorePath(path: string, configDir: string, allowedConfigPaths: string[] = [], excludePatterns: string[] = [], extraHiddenDirs: string[] = []): boolean {
   const configPrefix = configDir.endsWith("/") ? configDir : `${configDir}/`;
 
   if (path === configDir || path.startsWith(configPrefix)) {
@@ -1381,6 +1404,26 @@ export function shouldIgnorePath(path: string, configDir: string, allowedConfigP
     }
 
     return true;
+  }
+
+  // Block any top-level hidden directory that isn't explicitly opted in.
+  const firstSegment = path.split("/")[0];
+  if (firstSegment.startsWith(".") && firstSegment !== configDir && path.includes("/")) {
+    // Reserved dirs can never be opted in, regardless of extraHiddenDirs.
+    if (RESERVED_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
+
+    const inExtraDir = extraHiddenDirs.some((dir) => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return path === dir || path.startsWith(prefix);
+    });
+    if (!inExtraDir) return true;
+
+    const filename = path.split("/").pop() ?? "";
+    return (
+      RESERVED_FILES.has(filename) ||
+      isEmptyFolderMarkerPath(path) ||
+      excludePatterns.some((pattern) => matchesExcludePattern(path, pattern))
+    );
   }
 
   return (
