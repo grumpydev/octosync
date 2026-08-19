@@ -8,6 +8,7 @@ import {
   SyncManager,
   formatSummary,
   getConfigAllowedPaths,
+  getValidExtraHiddenDirs,
   hasUserVisibleSyncChanges,
   isValidExtraHiddenDir,
   matchesExcludePattern,
@@ -171,6 +172,18 @@ describe("sync helpers", () => {
     expect(isValidExtraHiddenDir("copilot")).toBe(false);
     expect(isValidExtraHiddenDir(".")).toBe(false);
     expect(isValidExtraHiddenDir("")).toBe(false);
+
+    // Parent-directory traversal must be rejected explicitly
+    expect(isValidExtraHiddenDir("..")).toBe(false);
+  });
+
+  it("getValidExtraHiddenDirs sanitizes tampered or manually-edited persisted settings", () => {
+    const dirtySettings: OctosyncSettings = {
+      ...DEFAULT_SETTINGS,
+      syncExtraHiddenDirs: [".copilot", "..", ".git", ".claude/skills", "not-hidden", ".claude"],
+    };
+
+    expect(getValidExtraHiddenDirs(dirtySettings)).toEqual([".copilot", ".claude"]);
   });
 
   it("getConfigAllowedPaths returns correct paths based on settings", () => {
@@ -345,6 +358,32 @@ describe("SyncManager", () => {
     expect(metadata.get(".copilot/skills/SKILL.md")?.sha).toBe(skillSha);
     // .other-hidden is not configured and must not be downloaded
     expect(vault.exists(".other-hidden/ignore.md")).toBe(false);
+  });
+
+  it("ignores a tampered '..' entry in syncExtraHiddenDirs instead of treating it as an adapter path", async () => {
+    const vault = new MemoryVault();
+    const github = new MockGitHubClient();
+    const metadata = await createMetadata();
+
+    // Settings bypassing the settings-tab UI validation (e.g. manually edited plugin data).
+    await github.addRemoteFile("../outside-vault.md", "should never be written");
+
+    const syncSettings = {
+      ...settings,
+      syncExtraHiddenDirs: [".."],
+    };
+    const manager = new SyncManager(
+      vault as never,
+      { trashFile: (file: TFile | TFolder) => vault.delete(file) } as never,
+      github as unknown as GitHubClient,
+      metadata,
+      syncSettings,
+      undefined,
+    );
+    const summary = await manager.sync();
+
+    expect(summary.downloaded).toBe(0);
+    expect(vault.exists("../outside-vault.md")).toBe(false);
   });
 
   it("plans sync without changing local files, remote files, or metadata", async () => {

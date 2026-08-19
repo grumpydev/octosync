@@ -719,7 +719,7 @@ export class SyncManager {
     for (const allowedPath of allowedPaths) {
       await this.scanAdapterPath(snapshots, allowedPath);
     }
-    for (const dir of this.settings.syncExtraHiddenDirs) {
+    for (const dir of getValidExtraHiddenDirs(this.settings)) {
       await this.scanAdapterPath(snapshots, dir);
     }
   }
@@ -1030,7 +1030,7 @@ export class SyncManager {
 
   private isAdapterPath(path: string): boolean {
     if (this.isConfigDirPath(path)) return true;
-    return this.settings.syncExtraHiddenDirs.some((dir) => {
+    return getValidExtraHiddenDirs(this.settings).some((dir) => {
       const prefix = dir.endsWith("/") ? dir : `${dir}/`;
       return path === dir || path.startsWith(prefix);
     });
@@ -1107,7 +1107,7 @@ export class SyncManager {
     );
   }
 
-  private shouldIgnorePath = (path: string): boolean => shouldIgnorePath(path, this.vault.configDir, getConfigAllowedPaths(this.settings, this.vault.configDir), this.settings.syncExcludePaths, this.settings.syncExtraHiddenDirs);
+  private shouldIgnorePath = (path: string): boolean => shouldIgnorePath(path, this.vault.configDir, getConfigAllowedPaths(this.settings, this.vault.configDir), this.settings.syncExcludePaths, getValidExtraHiddenDirs(this.settings));
 }
 
 function createEmptySummary(): SyncSummary {
@@ -1369,9 +1369,14 @@ export function getConfigAllowedPaths(settings: OctosyncSettings, configDir: str
 
 /** Returns true for a valid syncExtraHiddenDirs entry: a simple hidden dir name with no slashes and not reserved. */
 export function isValidExtraHiddenDir(name: string): boolean {
-  if (!name.startsWith(".") || name.length < 2 || name.includes("/")) return false;
+  if (!name.startsWith(".") || name.length < 2 || name.includes("/") || name === "..") return false;
   const reservedNames = new Set(RESERVED_PREFIXES.map((p) => p.replace(/\/$/, "")));
   return !reservedNames.has(name);
+}
+
+/** Sanitizes syncExtraHiddenDirs at the point of use so tampered or manually-edited persisted settings can't bypass UI validation. */
+export function getValidExtraHiddenDirs(settings: OctosyncSettings): string[] {
+  return settings.syncExtraHiddenDirs.filter(isValidExtraHiddenDir);
 }
 
 export function shouldIgnorePath(path: string, configDir: string, allowedConfigPaths: string[] = [], excludePatterns: string[] = [], extraHiddenDirs: string[] = []): boolean {
