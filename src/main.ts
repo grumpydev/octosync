@@ -60,7 +60,7 @@ export default class OctosyncPlugin extends Plugin {
       },
     );
     await this.metadata.load();
-    await this.pruneVaultExcludeMetadata();
+    await this.pruneInactiveMetadata();
 
     addIcon("octosync-logo", OCTOSYNC_ICON);
 
@@ -120,13 +120,23 @@ export default class OctosyncPlugin extends Plugin {
     await this.savePluginData({ settings: this.settings });
   }
 
+  async updateBookmarkSync(enabled: boolean): Promise<void> {
+    if (this.isSyncing()) {
+      throw new Error("Wait for the current sync to finish before changing bookmark sync.");
+    }
+    this.settings.syncBookmarks = enabled;
+    await this.saveSettings();
+    await this.pruneInactiveMetadata();
+    this.configureChangeIndicators();
+  }
+
   async updateVaultExcludePaths(paths: string[]): Promise<void> {
     this.settings.syncVaultExcludePaths = getValidVaultExcludePaths({
       ...this.settings,
       syncVaultExcludePaths: paths,
     });
     await this.saveSettings();
-    await this.pruneVaultExcludeMetadata();
+    await this.pruneInactiveMetadata();
 
     this.dirtyLocalPaths = new Set(
       Array.from(this.dirtyLocalPaths).filter(
@@ -604,15 +614,18 @@ export default class OctosyncPlugin extends Plugin {
     }
   }
 
-  private async pruneVaultExcludeMetadata(): Promise<void> {
+  private async pruneInactiveMetadata(): Promise<void> {
     const excludedPaths = getValidVaultExcludePaths(this.settings);
-    const removed = this.metadata.prunePaths((path) => isVaultPathExcluded(path, excludedPaths));
+    const bookmarkPath = `${this.app.vault.configDir}/bookmarks.json`;
+    const removed = this.metadata.prunePaths((path) =>
+      isVaultPathExcluded(path, excludedPaths) || (!this.settings.syncBookmarks && path === bookmarkPath),
+    );
     if (removed.files === 0 && removed.folders === 0) {
       return;
     }
 
     await this.metadata.save();
-    this.debugLog.write("metadata.pruned-device-local-exclusions", removed);
+    this.debugLog.write("metadata.pruned-inactive-paths", removed);
   }
 
   private setPendingConflicts(conflicts: string[]): void {

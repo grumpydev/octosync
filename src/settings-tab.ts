@@ -361,6 +361,22 @@ export class OctosyncSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName("Sync bookmarks")
+      .setDesc(`Sync ${configDir}/bookmarks.json. Workspace layouts remain excluded.`)
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.syncBookmarks)
+          .onChange(async (value) => {
+            try {
+              await this.plugin.updateBookmarkSync(value);
+            } catch (error) {
+              new Notice(error instanceof Error ? error.message : String(error));
+            }
+            toggle.setValue(this.plugin.settings.syncBookmarks);
+          });
+      });
+
+    new Setting(containerEl)
       .setName("Extra hidden directories")
       .setDesc(
         "One top-level hidden directory per line (e.g. .copilot, .claude, .codex). " +

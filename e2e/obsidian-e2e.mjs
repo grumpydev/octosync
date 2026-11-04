@@ -80,6 +80,45 @@ async function main() {
       assert.equal(await github.readFile(branch, "local-e2e.md"), "local e2e\n");
     });
 
+    await runTest("opt-in bookmarks upload, refresh live after download, and re-enable safely", async () => {
+      const configDir = await page.evaluate(() => app.vault.configDir);
+      const bookmarkPath = `${configDir}/bookmarks.json`;
+      const original = JSON.stringify({ items: [{ type: "group", title: "Local E2E bookmarks", items: [], ctime: 1 }] });
+      const remote = JSON.stringify({ items: [{ type: "group", title: "Remote E2E bookmarks", items: [], ctime: 2 }] });
+      assert.equal(await page.evaluate(() => app.plugins.plugins.octosync.settings.syncBookmarks), false);
+      await page.evaluate(async ({ bookmarkPath, original }) => {
+        await app.vault.adapter.write(bookmarkPath, original);
+        await app.plugins.plugins.octosync.updateBookmarkSync(true);
+      }, { bookmarkPath, original });
+      assert.match(await syncNow(page), /1 uploaded/);
+      assert.equal(await github.readFile(branch, bookmarkPath), original);
+
+      await github.writeFile(branch, bookmarkPath, remote);
+      assert.match(await syncNow(page), /1 downloaded/);
+      assert.equal(await fs.readFile(path.join(vaultPath, bookmarkPath), "utf8"), remote);
+      await page.evaluate(async () => {
+        app.setting.close();
+        const leaf = app.workspace.getLeavesOfType("bookmarks")[0] || app.workspace.getLeftLeaf(false);
+        await leaf.setViewState({ type: "bookmarks", active: true });
+        await app.workspace.revealLeaf(leaf);
+      });
+      await page.getByText("Remote E2E bookmarks", { exact: true }).waitFor({ timeout: 15000 });
+      assert.match(await syncNow(page), /No sync required/);
+
+      await page.evaluate(async (bookmarkPath) => {
+        const plugin = app.plugins.plugins.octosync;
+        await plugin.updateBookmarkSync(false);
+        if (plugin.metadata.get(bookmarkPath)) throw new Error("Disabled bookmark tracking was retained");
+        await app.vault.adapter.remove(bookmarkPath);
+      }, bookmarkPath);
+      assert.match(await syncNow(page), /No sync required/);
+      assert.equal(await github.readFile(branch, bookmarkPath), remote);
+      await page.evaluate(() => app.plugins.plugins.octosync.updateBookmarkSync(true));
+      assert.match(await syncNow(page), /1 downloaded/);
+      assert.equal(await fs.readFile(path.join(vaultPath, bookmarkPath), "utf8"), remote);
+      await page.evaluate(() => app.plugins.plugins.octosync.updateBookmarkSync(false));
+    });
+
     await runTest("device-local exclusions preserve GitHub files after local removal", async () => {
       const trackedPath = "Personal/tracked.md";
       const remoteOnlyPath = "Personal/remote-only.md";

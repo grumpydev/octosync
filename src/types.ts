@@ -18,6 +18,7 @@ export interface OctosyncSettings {
   syncCommunityPlugins: boolean;
   syncThemes: boolean;
   syncSnippets: boolean;
+  syncBookmarks: boolean;
   syncVaultExcludePaths: string[];
   syncExcludePaths: string[];
   syncExtraHiddenDirs: string[];
@@ -124,6 +125,7 @@ export const DEFAULT_SETTINGS: OctosyncSettings = {
   syncCommunityPlugins: false,
   syncThemes: false,
   syncSnippets: false,
+  syncBookmarks: false,
   syncVaultExcludePaths: [],
   syncExcludePaths: [],
   syncExtraHiddenDirs: [],

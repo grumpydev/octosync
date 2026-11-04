@@ -44,6 +44,10 @@ Manual mode can separately check GitHub for remote changes on an interval. That 
 
 **Sync community plugins** syncs `community-plugins.json` (the enabled-plugin ID list) and, after each sync, downloads and installs any enabled plugin that is missing locally. Plugin code (`manifest.json`, `main.js`, `styles.css`) is fetched from the plugin's own GitHub release, resolved via the official Obsidian community plugin registry — the same source Obsidian's built-in installer uses. Plugin data folders (settings, API keys/tokens) are never synced or downloaded.
 
+**Sync bookmarks** optionally syncs `bookmarks.json` in the vault's configured Obsidian configuration directory. It is off by default, including on upgrades. Workspace layouts, plugin settings, and tokens remain excluded. Enable it on each device that should share bookmarks, using the same configuration-directory path.
+
+Bookmarks sync as a whole file, not a merged list. Different versions on the first sync, or edits on both sides since the last sync, use the normal conflict-resolution flow. Run **Simulate sync** before first syncing bookmarks. Turning the option off leaves both copies in place and forgets their tracking; re-enabling compares them as a fresh sync. Device-local exclusions and hidden-path exclusions still take precedence. Check the Bookmarks pane after receiving changes; restart Obsidian if it has not refreshed before editing bookmarks again.
+
 ## Device-Local Exclusions
 
 **Excluded vault paths** accepts one vault-relative folder path per line, such as `Personal` or `Archive/Private`. The setting belongs to the current device. Matching folders and their contents are omitted from uploads, downloads, deletions, conflicts, empty-folder handling, and change indicators on that device, while their GitHub copies and other devices remain untouched.

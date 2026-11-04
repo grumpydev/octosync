@@ -1444,6 +1444,10 @@ export function getConfigAllowedPaths(settings: OctosyncSettings, configDir: str
     paths.push(`${configDir}/snippets`);
   }
 
+  if (settings.syncBookmarks) {
+    paths.push(`${configDir}/bookmarks.json`);
+  }
+
   return paths;
 }
 

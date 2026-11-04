@@ -270,12 +270,149 @@ describe("sync helpers", () => {
       getConfigAllowedPaths({ ...DEFAULT_SETTINGS, syncCommunityPlugins: true, syncThemes: true, syncSnippets: true }, configDir),
     ).toEqual([".obsidian/community-plugins.json", ".obsidian/themes", ".obsidian/snippets"]);
   });
+
+  it.each([".obsidian", ".custom-config"])("only opts in to bookmarks under %s", (configDir) => {
+    const path = `${configDir}/bookmarks.json`;
+    const allowed = getConfigAllowedPaths({ ...DEFAULT_SETTINGS, syncBookmarks: true }, configDir);
+    expect(DEFAULT_SETTINGS.syncBookmarks).toBe(false);
+    expect(shouldIgnorePath(path, configDir)).toBe(true);
+    expect(allowed).toEqual([path]);
+    expect(shouldIgnorePath(path, configDir, allowed)).toBe(false);
+    for (const excluded of ["workspace.json", "workspace-mobile.json", "app.json", "plugins/octosync/data.json", "community-plugins.json", "bookmarks.json.bak"]) {
+      expect(shouldIgnorePath(`${configDir}/${excluded}`, configDir, allowed)).toBe(true);
+    }
+    expect(shouldIgnorePath(path, configDir, allowed, ["bookmarks.json"])).toBe(true);
+    expect(shouldIgnorePath(path, configDir, allowed, [], [], [configDir])).toBe(true);
+  });
 });
 
 describe("SyncManager", () => {
   beforeEach(() => {
     vi.stubGlobal("window", { setTimeout });
     MockGitHubClient.reset();
+  });
+
+  describe.each([".obsidian", ".custom-config"])("bookmarks in %s", (configDir) => {
+    const path = `${configDir}/bookmarks.json`;
+    const enabled = { syncBookmarks: true };
+
+    it("uploads, downloads remote edits, and settles without syncing workspace files", async () => {
+      const vault = new MemoryVault(configDir);
+      const github = new MockGitHubClient();
+      const metadata = await createMetadata();
+      vault.addFile(path, '{"items":[]}');
+      vault.addFile(`${configDir}/workspace.json`, "private layout");
+      await github.addRemoteFile(`${configDir}/workspace-mobile.json`, "private mobile layout");
+      const manager = createManager(vault, github, metadata, enabled);
+      expect((await manager.sync()).uploaded).toBe(1);
+      expect(await github.readRemoteText(path)).toBe('{"items":[]}');
+      await github.addRemoteFile(path, '{"items":[{"type":"group","title":"Remote","items":[]}]}');
+      expect((await manager.sync()).downloaded).toBe(1);
+      expect(vault.readText(path)).toContain("Remote");
+      expect(hasUserVisibleSyncChanges(await manager.sync())).toBe(false);
+      expect(github.remote.has(`${configDir}/workspace.json`)).toBe(false);
+      expect(vault.exists(`${configDir}/workspace-mobile.json`)).toBe(false);
+    });
+
+    it("downloads a remote-only bookmark file through the adapter", async () => {
+      const vault = new MemoryVault(configDir);
+      const github = new MockGitHubClient();
+      const metadata = await createMetadata();
+      await github.addRemoteFile(path, '{"items":[]}');
+      expect((await createManager(vault, github, metadata, enabled).sync()).downloaded).toBe(1);
+      expect(vault.readText(path)).toBe('{"items":[]}');
+    });
+
+    it.each(["local", "remote", "both"] as const)("blocks conflicting edits and resolves with %s", async (resolution) => {
+      const vault = new MemoryVault(configDir);
+      const github = new MockGitHubClient();
+      const metadata = await createMetadata();
+      vault.addFile(path, "baseline");
+      const manager = createManager(vault, github, metadata, enabled);
+      await manager.sync();
+      vault.addFile(path, "local bookmarks");
+      await github.addRemoteFile(path, "remote bookmarks");
+      await expect(manager.sync()).rejects.toBeInstanceOf(SyncConflictError);
+      expect(vault.readText(path)).toBe("local bookmarks");
+      expect(await github.readRemoteText(path)).toBe("remote bookmarks");
+      await manager.resolveConflicts([path], resolution);
+      expect(vault.readText(path)).toBe(resolution === "local" ? "local bookmarks" : "remote bookmarks");
+      expect(await github.readRemoteText(path)).toBe(vault.readText(path));
+      if (resolution === "both") {
+        const backup = [...github.remote.keys()].find((candidate) => candidate.startsWith(`${configDir}/bookmarks.local-conflict-`));
+        expect(backup).toBeDefined();
+        expect(vault.readText(backup!)).toBe("local bookmarks");
+        expect(await github.readRemoteText(backup!)).toBe("local bookmarks");
+        await manager.sync();
+        expect(vault.readText(backup!)).toBe("local bookmarks");
+      }
+      expect(hasUserVisibleSyncChanges(await manager.sync())).toBe(false);
+    });
+
+    it("blocks different bookmark files on first sync", async () => {
+      const vault = new MemoryVault(configDir);
+      const github = new MockGitHubClient();
+      const metadata = await createMetadata();
+      vault.addFile(path, "local");
+      await github.addRemoteFile(path, "remote");
+      await expect(createManager(vault, github, metadata, enabled).sync()).rejects.toBeInstanceOf(SyncConflictError);
+      expect(vault.readText(path)).toBe("local");
+      expect(await github.readRemoteText(path)).toBe("remote");
+    });
+
+    it.each(["disabled", "hidden exclusion", "local exclusion"])("leaves tracked bookmarks untouched with %s", async (mode) => {
+      const vault = new MemoryVault(configDir);
+      const github = new MockGitHubClient();
+      const metadata = await createMetadata();
+      vault.addFile(path, "original");
+      await createManager(vault, github, metadata, enabled).sync();
+      await vault.adapter.remove(path);
+      const options = mode === "disabled" ? {} : mode === "hidden exclusion"
+        ? { ...enabled, syncExcludePaths: ["bookmarks.json"] }
+        : { ...enabled, syncVaultExcludePaths: [configDir] };
+      const manager = createManager(vault, github, metadata, options);
+      expect(hasUserVisibleSyncChanges(await manager.sync())).toBe(false);
+      expect(await github.readRemoteText(path)).toBe("original");
+      expect(vault.exists(path)).toBe(false);
+      expect(await manager.hasLocalChanges()).toBe(false);
+      await github.addRemoteFile(path, "edited remotely while excluded");
+      expect(await manager.hasRemoteChanges()).toBe(false);
+      expect(hasUserVisibleSyncChanges(await manager.sync())).toBe(false);
+      expect(vault.exists(path)).toBe(false);
+    });
+
+    it.each(["local", "remote"])("propagates an intentional %s deletion while enabled", async (side) => {
+      const vault = new MemoryVault(configDir);
+      const github = new MockGitHubClient();
+      const metadata = await createMetadata();
+      vault.addFile(path, "original");
+      const manager = createManager(vault, github, metadata, enabled);
+      await manager.sync();
+      if (side === "local") await vault.adapter.remove(path);
+      else github.remote.delete(path);
+      const summary = await manager.sync();
+      expect(side === "local" ? summary.deletedRemote : summary.deletedLocal).toBe(1);
+      expect(vault.exists(path)).toBe(false);
+      expect(github.remote.has(path)).toBe(false);
+    });
+
+    it.each(["local", "remote"])("restores a %s copy deleted while disabled after the toggle prunes tracking", async (side) => {
+      const vault = new MemoryVault(configDir);
+      const github = new MockGitHubClient();
+      const metadata = await createMetadata();
+      vault.addFile(path, "original");
+      const manager = createManager(vault, github, metadata, enabled);
+      await manager.sync();
+      // The settings toggle removes this baseline; its persistence is tested separately.
+      metadata.remove(path);
+      if (side === "local") await vault.adapter.remove(path);
+      else github.remote.delete(path);
+      const summary = await manager.sync();
+      expect(summary.deletedLocal + summary.deletedRemote).toBe(0);
+      expect(side === "local" ? summary.downloaded : summary.uploaded).toBe(1);
+      expect(vault.readText(path)).toBe("original");
+      expect(await github.readRemoteText(path)).toBe("original");
+    });
   });
 
   it("uploads local-only files and records metadata", async () => {
@@ -1126,7 +1263,7 @@ describe("SyncManager", () => {
 class MemoryVault {
   private readonly files = new Map<string, { file: TFile; bytes: Uint8Array }>();
   private readonly folders = new Map<string, TFolder>();
-  readonly configDir = ".obsidian";
+  constructor(readonly configDir = ".obsidian") {}
   failNextModifyBinary: Error | null = null;
 
   // Mirrors real Obsidian behaviour: vault.getFiles() does not return files inside
