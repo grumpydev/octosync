@@ -1,12 +1,17 @@
-import { addIcon, Modal, Notice, Plugin } from "obsidian";
+import { addIcon, FileSystemAdapter, Modal, Notice, Platform, Plugin } from "obsidian";
 import { createAuthProvider } from "./auth";
 import { ConflictResolutionModal } from "./conflict-modal";
 import { DebugLog, type DebugLogEntry } from "./debug-log";
 import { GitHubClient } from "./github";
 import { OCTOSYNC_ICON } from "./icons";
 import { MetadataStore } from "./metadata";
+import type { NodeFsVault } from "./node-vault";
 import { installMissingCommunityPlugins } from "./plugin-installer";
 import { OctosyncSettingTab } from "./settings-tab";
+import {
+  type BindingHost,
+  syncAllBindings,
+} from "./binding-sync";
 import {
   type ConflictResolution,
   formatSummary,
@@ -18,11 +23,20 @@ import {
   SyncManager,
   type SyncProgress,
 } from "./sync";
-import { DEFAULT_SETTINGS, type OctosyncSettings, type SyncSummary } from "./types";
+import { DEFAULT_SETTINGS, type OctosyncSettings, type SyncMetadata, type SyncSummary, type VaultBinding } from "./types";
+import {
+  ensureSelfBinding,
+  findBinding,
+  getSelfBinding,
+  migrateLegacyToBindings,
+  normalizeVaultFolderPath,
+} from "./vault-registry";
+import { VaultManagerModal } from "./vault-manager";
 
 interface OctosyncPluginData {
   settings?: Partial<OctosyncSettings>;
   metadata?: unknown;
+  bindingMetadata?: Record<string, SyncMetadata>;
   debugLog?: DebugLogEntry[];
 }
 
@@ -45,6 +59,8 @@ export default class OctosyncPlugin extends Plugin {
   private debugLog!: DebugLog;
   private pendingConflictPaths: string[] | null = null;
   private conflictModal: ConflictResolutionModal | null = null;
+  private armVaults = new Map<string, NodeFsVault>();
+  private armConflicts = new Map<string, string[]>();
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -64,7 +80,11 @@ export default class OctosyncPlugin extends Plugin {
 
     addIcon("octosync-logo", OCTOSYNC_ICON);
 
-    this.ribbonIconEl = this.addRibbonIcon("octosync-logo", "Sync with Octosync", () => {
+    this.ribbonIconEl = this.addRibbonIcon("octosync-logo", "Otto Octavius Sync", () => {
+      if (this.isHubMode()) {
+        this.openVaultManager();
+        return;
+      }
       void this.syncNow();
     });
     this.ribbonIconEl.parentElement?.appendChild(this.ribbonIconEl);
@@ -74,9 +94,25 @@ export default class OctosyncPlugin extends Plugin {
 
     this.addCommand({
       id: "sync-now",
-      name: "Sync with GitHub",
+      name: "Sync this vault with GitHub",
       callback: () => {
         void this.syncNow();
+      },
+    });
+
+    this.addCommand({
+      id: "sync-all-vaults",
+      name: "Sync all registered vaults",
+      callback: () => {
+        void this.syncAllVaults();
+      },
+    });
+
+    this.addCommand({
+      id: "open-vault-manager",
+      name: "Open vault manager",
+      callback: () => {
+        this.openVaultManager();
       },
     });
 
@@ -85,9 +121,17 @@ export default class OctosyncPlugin extends Plugin {
 
     if (this.settings.syncMode === "automatic" && this.settings.syncOnStartup) {
       this.app.workspace.onLayoutReady(() => {
-        void this.requestSync({ source: "automatic" });
+        void this.runStartupSync();
       });
     }
+  }
+
+  private async runStartupSync(): Promise<void> {
+    if (this.isHubMode()) {
+      await this.syncAllVaults();
+      return;
+    }
+    await this.requestSync({ source: "automatic" });
   }
 
   onunload(): void {
@@ -114,9 +158,21 @@ export default class OctosyncPlugin extends Plugin {
     // Re-sanitize in case persisted data was manually edited or predates validation.
     this.settings.syncExtraHiddenDirs = getValidExtraHiddenDirs(this.settings);
     this.settings.syncVaultExcludePaths = getValidVaultExcludePaths(this.settings);
+    if (!Array.isArray(this.settings.bindings)) {
+      this.settings.bindings = [];
+    }
+    // Hub mode requires the desktop app; normalize on mobile.
+    if (!Platform.isDesktopApp && this.settings.managerMode === "hub") {
+      this.settings.managerMode = "standalone";
+    }
+    // One-time migration from legacy single-vault Octosync settings.
+    migrateLegacyToBindings(this.settings);
+    ensureSelfBinding(this.settings);
+    await this.saveSettings();
   }
 
   async saveSettings(): Promise<void> {
+    ensureSelfBinding(this.settings);
     await this.savePluginData({ settings: this.settings });
   }
 
@@ -158,6 +214,159 @@ export default class OctosyncPlugin extends Plugin {
     await this.debugLog.clear();
   }
 
+  /** Hub mode is only meaningful on desktop where other vault folders are reachable. */
+  isHubMode(): boolean {
+    return this.settings.managerMode === "hub" && Platform.isDesktopApp;
+  }
+
+  getHubVaultPath(): string | null {
+    if (!Platform.isDesktopApp) {
+      return null;
+    }
+    const adapter = this.app.vault.adapter;
+    return adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null;
+  }
+
+  openVaultManager(): void {
+    new VaultManagerModal(this).open();
+  }
+
+  async syncAllVaults(): Promise<void> {
+    return this.runWithSyncLock(
+      async () => {
+        const selfId = getSelfBinding(this.settings.bindings)?.id;
+        const bindings = this.isHubMode()
+          ? this.settings.bindings.filter((binding) => binding.enabled)
+          : this.settings.bindings.filter((binding) => binding.enabled && binding.id === selfId);
+
+        if (bindings.length === 0) {
+          new Notice("Otto: no enabled vault bindings to sync.");
+          return;
+        }
+
+        await syncAllBindings(this.bindingHost(), { bindings });
+        this.dirtyLocalPaths.clear();
+        await this.refreshPostOperationIndicators();
+      },
+      { source: "manual" },
+    );
+  }
+
+  getBindingConflicts(bindingId: string): string[] | null {
+    const self = getSelfBinding(this.settings.bindings);
+    if (self && bindingId === self.id) {
+      return this.pendingConflictPaths;
+    }
+    return this.armConflicts.get(bindingId) ?? null;
+  }
+
+  setBindingConflicts(bindingId: string, conflicts: string[] | null): void {
+    const self = getSelfBinding(this.settings.bindings);
+    if (self && bindingId === self.id) {
+      this.pendingConflictPaths = conflicts ? [...conflicts].sort() : null;
+      if (!this.pendingConflictPaths) {
+        this.conflictModal = null;
+      }
+      this.updateSyncUiState();
+      return;
+    }
+
+    if (conflicts) {
+      this.armConflicts.set(bindingId, [...conflicts].sort());
+    } else {
+      this.armConflicts.delete(bindingId);
+    }
+  }
+
+  async saveBindingDraft(draft: VaultBinding): Promise<void> {
+    const normalized = { ...draft };
+    if (normalized.vaultPath !== "") {
+      normalized.vaultPath = normalizeVaultFolderPath(normalized.vaultPath) ?? "";
+    }
+
+    const index = this.settings.bindings.findIndex((binding) => binding.id === normalized.id);
+    if (index >= 0) {
+      this.settings.bindings[index] = normalized;
+    } else {
+      this.settings.bindings.push(normalized);
+    }
+
+    await this.saveSettings();
+  }
+
+  async removeBinding(bindingId: string): Promise<void> {
+    const binding = findBinding(this.settings.bindings, bindingId);
+    if (!binding || binding.vaultPath === "") {
+      new Notice("Otto: the plugin's own vault binding cannot be removed.");
+      return;
+    }
+
+    this.settings.bindings = this.settings.bindings.filter((candidate) => candidate.id !== bindingId);
+    this.armConflicts.delete(bindingId);
+    this.armVaults.delete(bindingId);
+    await this.saveSettings();
+    await this.removeMetadataSlot(bindingId);
+  }
+
+  private async removeMetadataSlot(bindingId: string): Promise<void> {
+    const data = await this.loadPluginData();
+    const slots = data.bindingMetadata ?? {};
+    if (!(bindingId in slots)) {
+      return;
+    }
+    const { [bindingId]: _removed, ...rest } = slots;
+    await this.saveData({ ...data, bindingMetadata: rest });
+  }
+
+  /** The BindingHost implementation handed to the binding sync runner. */
+  bindingHost(): BindingHost {
+    return {
+      vault: this.app.vault,
+      fileManager: this.app.fileManager,
+      getSettings: () => this.settings,
+      persistBinding: async (binding) => {
+        const index = this.settings.bindings.findIndex((candidate) => candidate.id === binding.id);
+        if (index >= 0) {
+          this.settings.bindings[index] = binding;
+        }
+        await this.saveSettings();
+      },
+      loadMetadataSlot: async (bindingId) => {
+        const data = await this.loadPluginData();
+        return data.bindingMetadata?.[bindingId];
+      },
+      saveMetadataSlot: async (bindingId, metadata) => {
+        const data = await this.loadPluginData();
+        await this.saveData({
+          ...data,
+          bindingMetadata: {
+            ...(data.bindingMetadata ?? {}),
+            [bindingId]: metadata,
+          },
+        });
+      },
+      debugLog: (message, data) => {
+        this.debugLog.write(message, data);
+      },
+      getHubVaultPath: () => this.getHubVaultPath(),
+      openArmVault: async (binding) => {
+        if (!Platform.isDesktopApp) {
+          throw new Error("Arm vaults are only available on desktop.");
+        }
+        let vault = this.armVaults.get(binding.id);
+        if (!vault) {
+          const { NodeFsVault } = await import("./node-vault");
+          vault = new NodeFsVault(binding.vaultPath);
+          this.armVaults.set(binding.id, vault);
+        }
+        await vault.rescan();
+        return vault;
+      },
+      getBindingConflicts: (bindingId) => this.getBindingConflicts(bindingId),
+      setBindingConflicts: (bindingId, conflicts) => this.setBindingConflicts(bindingId, conflicts),
+    };
+  }
+
   configureIntervalSync(): void {
     if (this.intervalId !== null) {
       window.clearInterval(this.intervalId);
@@ -169,10 +378,18 @@ export default class OctosyncPlugin extends Plugin {
     }
 
     this.intervalId = window.setInterval(() => {
-      void this.requestSync({ source: "automatic" });
+      void this.runIntervalSync();
     }, this.settings.syncIntervalMinutes * 60 * 1000);
 
     this.registerInterval(this.intervalId);
+  }
+
+  private async runIntervalSync(): Promise<void> {
+    if (this.isHubMode()) {
+      await this.syncAllVaults();
+      return;
+    }
+    await this.requestSync({ source: "automatic" });
   }
 
   configureChangeIndicators(): void {
@@ -492,6 +709,7 @@ export default class OctosyncPlugin extends Plugin {
       this.settings.lastSyncCompletedAt = Date.now();
       this.settings.lastSyncSummary = formatSummary(summary);
       await this.saveSettings();
+      await this.mirrorSelfBindingRunSummary(this.settings.lastSyncSummary, true);
       this.debugLog.write("sync.complete", summary);
       progressNotice?.hide();
       notifySummary(summary);
@@ -519,6 +737,7 @@ export default class OctosyncPlugin extends Plugin {
       const message = error instanceof Error ? error.message : String(error);
       this.settings.lastSyncSummary = `Failed: ${message}`;
       await this.saveSettings();
+      await this.mirrorSelfBindingRunSummary(this.settings.lastSyncSummary, false);
       this.debugLog.write("sync.failed", { message });
       progressNotice?.hide();
       new Notice(`Octosync failed: ${message}`, 8000);
@@ -599,6 +818,18 @@ export default class OctosyncPlugin extends Plugin {
       console.error("Octosync conflict resolution failed", error);
       await this.refreshPostOperationIndicators();
     }
+  }
+
+  private async mirrorSelfBindingRunSummary(summary: string, completed: boolean): Promise<void> {
+    const self = getSelfBinding(this.settings.bindings);
+    if (!self) {
+      return;
+    }
+    self.lastSyncSummary = summary;
+    if (completed) {
+      self.lastSyncCompletedAt = Date.now();
+    }
+    await this.saveSettings();
   }
 
   private async refreshPostOperationIndicators(): Promise<void> {

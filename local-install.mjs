@@ -24,7 +24,7 @@ if (!vaultStat?.isDirectory()) {
   process.exit(1);
 }
 
-const pluginDir = path.join(resolvedVaultRoot, ".obsidian", "plugins", "octosync");
+const pluginDir = path.join(resolvedVaultRoot, ".obsidian", "plugins", "otto-octavius-sync");
 await fs.mkdir(pluginDir, { recursive: true });
 
 for (const file of runtimeFiles) {
@@ -52,7 +52,7 @@ function expandHome(target) {
   return target;
 }
 
-console.log(`Installed Octosync to ${pluginDir}`);
+console.log(`Installed Otto Octavius Sync to ${pluginDir}`);
 
 async function statOrNull(target) {
   try {

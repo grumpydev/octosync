@@ -145,3 +145,76 @@
   padding: 4px 6px;
   word-break: break-word;
 }
+
+/* Otto Octavius vault manager */
+
+.octosync-manager-status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin-bottom: 8px;
+}
+
+.octosync-manager-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.octosync-binding-row {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.octosync-binding-header {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.octosync-binding-name {
+  font-weight: var(--font-semibold);
+}
+
+.octosync-binding-vault {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  word-break: break-all;
+}
+
+.octosync-binding-badge {
+  border-radius: 10px;
+  font-size: var(--font-ui-smaller);
+  padding: 1px 8px;
+}
+
+.octosync-binding-badge.is-disabled {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-muted);
+}
+
+.octosync-binding-badge.is-conflict {
+  background-color: var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+.octosync-binding-meta {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin-top: 2px;
+}
+
+.octosync-binding-summary {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  margin-top: 4px;
+}
+
+.octosync-binding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}

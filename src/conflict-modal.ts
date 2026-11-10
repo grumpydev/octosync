@@ -7,6 +7,7 @@ export class ConflictResolutionModal extends Modal {
     private readonly plugin: OctosyncPlugin,
     private readonly conflicts: string[],
     private readonly onClosed?: () => void,
+    private readonly resolver?: (paths: string[], resolution: ConflictResolution) => Promise<void>,
   ) {
     super(plugin.app);
   }
@@ -79,6 +80,10 @@ export class ConflictResolutionModal extends Modal {
 
   private async resolve(resolution: ConflictResolution): Promise<void> {
     this.close();
+    if (this.resolver) {
+      await this.resolver(this.conflicts, resolution);
+      return;
+    }
     await this.plugin.resolveConflicts(this.conflicts, resolution);
   }
 }

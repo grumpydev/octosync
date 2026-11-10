@@ -1,10 +1,10 @@
 {
-  "id": "octosync",
-  "name": "Octosync",
-  "version": "1.0.14",
+  "id": "otto-octavius-sync",
+  "name": "Otto Octavius Sync",
+  "version": "2.0.0",
   "minAppVersion": "1.12.3",
-  "description": "Sync your vault directly with GitHub APIs on desktop and mobile.",
-  "author": "grumpydev",
-  "authorUrl": "https://github.com/grumpydev",
+  "description": "Hub for syncing multiple vaults to multiple GitHub repositories directly via GitHub APIs, no local Git required.",
+  "author": "adishsrivastava",
+  "authorUrl": "https://github.com/adishsrivastava",
   "isDesktopOnly": false
 }

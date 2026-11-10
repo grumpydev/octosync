@@ -1,5 +1,34 @@
 export type AuthMode = "pat";
 export type SyncMode = "manual" | "automatic";
+/**
+ * Otto Octavius Sync manager mode.
+ * - "standalone": the plugin syncs only the vault it runs in (works on mobile).
+ * - "hub": desktop only. The plugin vault is the hub and syncs every enabled
+ *   vault binding (arm), including vault folders without the plugin installed.
+ */
+export type ManagerMode = "standalone" | "hub";
+
+/**
+ * One vault-to-repository binding (an "arm"). A binding whose vaultPath is the
+ * sentinel SELF_VAULT_PATH describes the vault the plugin itself runs in.
+ */
+export interface VaultBinding {
+  id: string;
+  name: string;
+  /** Absolute path of the vault folder on this machine. Empty string = the plugin's own vault. */
+  vaultPath: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  /** Optional per-binding token override; falls back to the global token. */
+  token: string;
+  enabled: boolean;
+  syncBookmarks: boolean;
+  /** Vault-relative paths excluded from sync for this binding only. */
+  excludePaths: string[];
+  lastSyncSummary: string;
+  lastSyncCompletedAt: number | null;
+}
 
 export interface OctosyncSettings {
   authMode: AuthMode;
@@ -23,6 +52,8 @@ export interface OctosyncSettings {
   syncExcludePaths: string[];
   syncExtraHiddenDirs: string[];
   debugLogging: boolean;
+  managerMode: ManagerMode;
+  bindings: VaultBinding[];
   lastSyncStartedAt: number | null;
   lastSyncCompletedAt: number | null;
   lastSyncSummary: string;
@@ -130,6 +161,8 @@ export const DEFAULT_SETTINGS: OctosyncSettings = {
   syncExcludePaths: [],
   syncExtraHiddenDirs: [],
   debugLogging: false,
+  managerMode: "standalone",
+  bindings: [],
   lastSyncStartedAt: null,
   lastSyncCompletedAt: null,
   lastSyncSummary: "",
