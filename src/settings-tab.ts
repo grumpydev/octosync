@@ -1,4 +1,4 @@
-import { App, ButtonComponent, DropdownComponent, Notice, PluginSettingTab, Setting, setIcon } from "obsidian";
+import { App, ButtonComponent, DropdownComponent, Notice, Platform, PluginSettingTab, Setting, setIcon } from "obsidian";
 import type OctosyncPlugin from "./main";
 import { createAuthProvider } from "./auth";
 import { GitHubClient } from "./github";
@@ -28,9 +28,12 @@ export class OctosyncSettingTab extends PluginSettingTab {
     this.statusEl = containerEl.createDiv({ cls: "octosync-status" });
     this.setStatus(this.getInitialStatus());
 
+    this.addManagerModeSettings(containerEl);
+    this.addVaultRegistrySettings(containerEl);
+
     new Setting(containerEl)
       .setName("GitHub token")
-      .setDesc("Use a fine-grained token restricted to one repository with Contents read/write.")
+      .setDesc("Use a fine-grained token restricted to one repository with Contents read/write. Applies to this vault; arm vaults can override it per binding.")
       .addText((text) => {
         text
           .setPlaceholder("github_pat_...")
@@ -72,6 +75,44 @@ export class OctosyncSettingTab extends PluginSettingTab {
       cls: "octosync-settings-tagline",
       text: "GitHub sync for desktop and mobile vaults.",
     });
+  }
+
+  private addManagerModeSettings(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName("Manager mode")
+      .setDesc(
+        Platform.isDesktopApp
+          ? "Hub mode lets this vault manage and sync every registered vault on this machine, each to its own repository. Standalone syncs only this vault."
+          : "Hub mode requires the desktop app. This device runs in standalone mode and syncs only this vault.",
+      )
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("standalone", "Standalone (this vault only)")
+          .addOption("hub", "Hub (manage multiple vaults)")
+          .setValue(this.plugin.settings.managerMode === "hub" && Platform.isDesktopApp ? "hub" : "standalone")
+          .onChange(async (value) => {
+            this.plugin.settings.managerMode = value === "hub" && Platform.isDesktopApp ? "hub" : "standalone";
+            await this.plugin.saveSettings();
+            this.display();
+          });
+      });
+  }
+
+  private addVaultRegistrySettings(containerEl: HTMLElement): void {
+    const enabledCount = this.plugin.settings.bindings.filter((binding) => binding.enabled).length;
+    new Setting(containerEl)
+      .setName("Vault registry")
+      .setDesc(
+        `${this.plugin.settings.bindings.length} vault(s) registered, ${enabledCount} enabled. Each vault points at its own repository.`,
+      )
+      .addButton((button) => {
+        button
+          .setButtonText("Open vault manager")
+          .setCta()
+          .onClick(() => {
+            this.plugin.openVaultManager();
+          });
+      });
   }
 
   private addCurrentRepositorySettings(containerEl: HTMLElement): void {

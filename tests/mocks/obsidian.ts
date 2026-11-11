@@ -10,6 +10,13 @@ export class TFolder {
 
 export class Vault {}
 
+export const Platform = {
+  isDesktopApp: true,
+  isMobile: false,
+};
+
+export class FileSystemAdapter {}
+
 export class Notice {
   static messages: string[] = [];
 

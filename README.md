@@ -1,12 +1,24 @@
-# Octosync
+# Otto Octavius Sync
 
 <p align="center">
-  <img src="logo.png" alt="Octosync logo" width="128" height="128">
+  <img src="logo.png" alt="Otto Octavius Sync logo" width="128" height="128">
 </p>
 
-Octosync is an Obsidian plugin that syncs a vault directly with GitHub without requiring a local Git install.
+Otto Octavius Sync is an Obsidian plugin that syncs vaults directly with GitHub without requiring a local Git install — and unlike its upstream project [Octosync](https://github.com/grumpydev/octosync), it can manage **many vaults at once**, each pointed at its own repository.
 
-It is built for people who like GitHub as a durable home for their notes, but do not want every device to be a developer workstation. Phones, tablets, locked-down work laptops, and lightweight machines can all be awkward places to install, authenticate, and maintain Git. Octosync talks to GitHub's API from inside Obsidian, so the device only needs Obsidian, the plugin, and a GitHub token with access to the repository you choose.
+Like its eight-armed namesake, one vault acts as the hub (the brain) and reaches every registered vault (an arm) on the same machine. Phones, tablets, locked-down work laptops, and lightweight machines can all be awkward places to install, authenticate, and maintain Git. Otto talks to GitHub's API from inside Obsidian, so a device only needs Obsidian, the plugin, and GitHub tokens with access to the repositories you choose.
+
+## Multiple Vaults, Multiple Repositories
+
+**Every vault-to-repository pair is a "binding" (an arm).** Add as many as you need from the vault manager:
+
+- **Hub mode** (desktop): the vault running the plugin manages every arm. Arm vaults do **not** need the plugin installed or enabled — Otto reads and writes their folders directly on disk and syncs each one to its own `owner/repo/branch` through the same plan-then-apply engine used for the hub vault itself.
+- **Standalone mode** (default, works everywhere incl. mobile): the plugin syncs only the vault it runs in, exactly like upstream Octosync. On mobile, hub mode is unavailable and Otto falls back to standalone automatically.
+- Each binding has its own branch, optional token override, bookmark sync preference, and device-local exclusions. The plugin's own vault is always a binding too, so a fresh install behaves like Octosync (single vault → single repo) until you register more arms.
+
+Open the manager with the ribbon icon in hub mode, the command palette ("Open vault manager"), or the **Vault registry** section of the settings. From there you can sync all arms, sync or simulate one arm, review per-arm conflicts, and add/edit/remove bindings.
+
+Arm sync metadata (per-file SHAs) is stored in the hub vault's plugin data, keyed by binding — nothing is written into the arm vaults' `.obsidian` folders. The engine deliberately excludes `.obsidian/**` (and reserved paths like `.git/`, `.trash/`, `.gitignore`) from every vault, so tokens and device-specific state are never uploaded.
 
 Install from the [Obsidian Community Plugin directory](https://community.obsidian.md/plugins/octosync).
 
@@ -85,12 +97,10 @@ Support is optional and does not unlock features.
 
 ## Manual Installation
 
-The easiest installation path is the [Obsidian Community Plugin directory](https://community.obsidian.md/plugins/octosync).
-
 Build or download the plugin files, then place them in:
 
 ```text
-<vault>/.obsidian/plugins/octosync/
+<vault>/.obsidian/plugins/otto-octavius-sync/
 ```
 
 The folder should contain:
@@ -101,16 +111,18 @@ manifest.json
 styles.css
 ```
 
-Restart Obsidian or reload plugins, then enable Octosync from Community plugins.
+Restart Obsidian or reload plugins, then enable Otto Octavius Sync from Community plugins.
 
 ## GitHub Token
 
-Octosync currently uses a fine-grained GitHub personal access token. Create one for only the repository you want to sync and grant:
+Otto uses a fine-grained GitHub personal access token. Create one for only the repository you want to sync and grant:
 
 - `Contents`: read and write
 - `Metadata`: read
 
-Store the token in Octosync settings inside Obsidian. Octosync excludes `.obsidian/**` from vault sync so plugin settings and tokens are not uploaded as notes.
+Store the global token in Otto's settings inside Obsidian, or set a per-binding token override in the vault manager for arms that live in other repositories or accounts. Otto excludes `.obsidian/**` from vault sync so plugin settings and tokens are not uploaded as notes.
+
+When a hub syncs arm vaults on desktop, it needs tokens with access to *all* of their repositories (one broad token, or per-binding tokens).
 
 ## Development
 
